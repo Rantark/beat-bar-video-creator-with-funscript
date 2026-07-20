@@ -1,0 +1,32 @@
+[project]
+name = "funscript-gen-backend"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "python-multipart>=0.0.12",
+    # Motion detection stack. Headless is the right choice regardless
+    # (no OpenCV GUI needed — everything renders in the browser) and it
+    # sidesteps the GTK/Qt dependency chain.
+    "opencv-python-headless>=4.10",
+    "numpy>=1.26",
+    "scipy>=1.13",
+    "yt-dlp>=2024.10",
+]
+
+[project.optional-dependencies]
+dev = ["ruff>=0.7"]
+# Optional: install with `pip install -e .[desktop]` to enable the
+# native-window launcher (backend/desktop.py).
+desktop = ["pywebview>=5.3"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]

@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.env
+
+# Node
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+
+# App data (uploaded videos, generated sprites & funscripts, sqlite db)
+backend/storage/uploads/
+backend/storage/sprites/
+backend/storage/output/
+backend/storage/*.db*
+
+# Editor
+.vscode/
+.idea/
+*.swp

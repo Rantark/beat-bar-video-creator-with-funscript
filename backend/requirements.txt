@@ -1,0 +1,30 @@
+# Backend runtime dependencies. Kept in sync with pyproject.toml so pip
+# users get the same versions as the editable install.
+#
+# Install:
+#   python -m venv .venv
+#   .\.venv\Scripts\python.exe -m pip install --upgrade pip
+#   .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+#
+# Tested on Python 3.14 (Windows). The opencv-python-headless build is
+# preferred over opencv-python — no GUI is needed (everything renders in
+# the browser) and it sidesteps GTK/Qt dependency chains.
+
+fastapi>=0.115
+uvicorn[standard]>=0.32
+pydantic>=2.9
+pydantic-settings>=2.6
+python-multipart>=0.0.12
+
+opencv-python-headless>=4.10
+numpy>=1.26
+scipy>=1.13
+
+# URL video ingest — pulls videos directly from most video sites so
+# they don't have to be manually downloaded first.
+yt-dlp>=2024.10
+
+# Desktop-app launcher (start-desktop.bat / backend/desktop.py). Only
+# needed if you want a native window instead of the browser tab.
+# Windows uses WebView2 (bundled with Windows 10 21H1+ / Windows 11).
+pywebview>=5.3
