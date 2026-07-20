@@ -1,9 +1,22 @@
 # funscript-gen — self-hosted mobile-first funscript generator with a built-in editor and audio-driven mode
 
-I built a small self-hosted web app that generates `.funscript` files
-from videos. It runs locally on a Windows desktop and is driven from a
-phone browser over Tailscale, or as a native desktop app in its own
-window. Nothing leaves your machine.
+**Source code:** https://github.com/Rantark/beat-bar-video-creator-with-funscript
+
+**Full disclosure up front:** I personally don't know how to code — this
+was entirely vibe-coded with an AI assistant. I drove the design and
+tested every feature end-to-end, but every line of Python and
+TypeScript was written by the model. That's why the repo is public and
+MIT licensed — I want anyone considering running this to be able to
+read the actual code first and confirm it's doing what I say it's
+doing. If you spot something dumb, security-relevant, or just plain
+wrong, an issue on GitHub is very welcome.
+
+With that out of the way — here's what it does.
+
+I've been running a small self-hosted web app that generates
+`.funscript` files from videos. It runs locally on a Windows desktop
+and is driven from a phone browser over Tailscale, or as a native
+desktop app in its own window. Nothing leaves your machine.
 
 ## What it does
 
@@ -165,7 +178,10 @@ Full install + tuning docs and per-detection-mode notes live in the
 - Multi-user / auth. Single-user by design; Tailscale gates access.
 - Cloud deployment. It's built for a home desktop.
 
-Happy to answer questions or take feedback. The code is deliberately
-small and organized so a specific algorithm change (swap
-Lucas-Kanade for something else in zone mode, or replace the onset
-detector) is one file.
+Happy to answer questions or take feedback. Since I can't actually
+read the code myself, technical feedback is best filed as a GitHub
+issue where I can hand it back to the AI with proper context —
+https://github.com/Rantark/beat-bar-video-creator-with-funscript/issues.
+The codebase is deliberately small and organized so a specific
+algorithm change (swap Lucas-Kanade for something else in zone mode,
+or replace the onset detector) is one file.
