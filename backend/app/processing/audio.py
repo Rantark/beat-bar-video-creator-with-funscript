@@ -25,6 +25,35 @@ from app.processing.funscript import write_funscript
 from app.processing.images import decode_data_url
 
 
+def _normalize_pattern(raw: object) -> list[dict] | None:
+    """Accept either the legacy boolean[] or the new {slots:[{on,max_up,max_down}]}
+    shape and return an internal list-of-dicts with all three fields.
+    Returns None if the shape is unrecognizable — the caller drops it."""
+    if isinstance(raw, list):
+        out: list[dict] = []
+        for slot in raw:
+            out.append({"on": bool(slot), "max_up": 100, "max_down": 0})
+        return out if out else None
+    if isinstance(raw, dict):
+        slots = raw.get("slots")
+        if not isinstance(slots, list):
+            return None
+        out = []
+        for slot in slots:
+            if isinstance(slot, dict):
+                up = int(slot.get("max_up", 100))
+                dn = int(slot.get("max_down", 0))
+                up = max(0, min(100, up))
+                dn = max(0, min(100, dn))
+                if dn > up:
+                    dn, up = up, dn
+                out.append({"on": bool(slot.get("on")), "max_up": up, "max_down": dn})
+            else:
+                out.append({"on": bool(slot), "max_up": 100, "max_down": 0})
+        return out if out else None
+    return None
+
+
 class AudioProcessor:
     def run(
         self,
@@ -66,17 +95,19 @@ class AudioProcessor:
         section_fluctuation = max(0.0, min(1.0, float(audio.get("section_fluctuation", 0.0))))
         pattern_variety = max(0.0, min(1.0, float(audio.get("pattern_variety", 0.0))))
 
-        # User-defined beat patterns. Each pattern is a fixed-length
-        # array of booleans representing beat slots at the section's
-        # detected period. Coerce liberally — the frontend sends
-        # arrays of booleans but nothing here should crash on stray
-        # values from a saved-preset that predates the field.
+        # User-defined beat patterns. Two accepted shapes:
+        #   * Legacy: [[true, false, true], ...] — a list of boolean
+        #     arrays. Each slot defaults to max_up=100, max_down=0.
+        #   * New:    [{"slots": [{"on": bool, "max_up": int, "max_down": int}, ...]}]
+        # Coerce liberally so a saved preset from an older UI doesn't
+        # crash the job.
         raw_patterns = audio.get("patterns") or []
-        patterns: list[list[bool]] = []
+        patterns: list[list[dict]] = []
         if isinstance(raw_patterns, list):
             for p in raw_patterns:
-                if isinstance(p, list) and len(p) >= 2:
-                    patterns.append([bool(x) for x in p])
+                normalized = _normalize_pattern(p)
+                if normalized and len(normalized) >= 2:
+                    patterns.append(normalized)
 
         progress_cb(0.05)
         pcm = audio_beats.extract_audio_pcm(video.path, sample_rate=22050)
@@ -107,8 +138,9 @@ class AudioProcessor:
         # onsets pass through raw; silent sections drop out entirely so
         # the idle animation takes over there.
         section_meta: list[dict] = []
+        beat_depth_overrides: list[tuple[float, float] | None] | None = None
         if regularize:
-            onset_ms, section_meta = audio_beats.regularize_beats(
+            onset_ms, section_meta, beat_depth_overrides = audio_beats.regularize_beats(
                 onset_ms, novelty, hop_ms, video.duration_ms,
                 section_min_ms=section_min_ms,
                 section_target_ms=section_target_ms,
@@ -125,6 +157,7 @@ class AudioProcessor:
             variety_amount=variety_amount,
             idle_enabled=idle_enabled,
             motion_smoothing=motion_smoothing,
+            beat_depth_overrides=beat_depth_overrides,
         )
         write_funscript(out_path, actions)
 

@@ -27,6 +27,7 @@ def beats_to_actions(
     variety_amount: float = 0.0,
     idle_enabled: bool = True,
     motion_smoothing: int = 2,
+    beat_depth_overrides: list[tuple[float, float] | None] | None = None,
 ) -> list[dict]:
     """Emit a funscript action list from a beat-timestamp list.
 
@@ -38,6 +39,12 @@ def beats_to_actions(
       * Smoothstep motion between reversals so the toy accelerates
         gradually instead of slam-stopping at every extreme.
       * Idle oscillation during silent gaps.
+
+    `beat_depth_overrides` (when supplied, parallel to `beats_ms`) lets
+    an upstream caller pin (up, down) per individual beat — used by
+    audio-mode preset patterns to give each slot its own stroke depth.
+    An entry of None on any given beat falls back to the section-computed
+    shape below, so overrides only need to be set on the beats they apply to.
     """
     if max_up_fast is None:
         max_up_fast = max_up
@@ -63,6 +70,13 @@ def beats_to_actions(
     # section they belong to. section_idx lets us tell same-section pairs
     # apart from inter-section pairs when deciding the transition shape.
     beat_recs: list[tuple[int, int, int, int]] = []  # (t, s_up, s_down, sec_idx)
+    # Build a t → override map so beat-order changes inside detect_sections
+    # don't misalign the parallel overrides list.
+    override_by_t: dict[int, tuple[float, float]] = {}
+    if beat_depth_overrides and len(beat_depth_overrides) == len(beats_ms):
+        for t, d in zip(beats_ms, beat_depth_overrides):
+            if d is not None:
+                override_by_t[t] = d
     for sec_idx, section in enumerate(sections):
         if len(section) >= 2:
             intervals = [section[i + 1] - section[i] for i in range(len(section) - 1)]
@@ -73,10 +87,15 @@ def beats_to_actions(
         base_up = max_up_fast + tt * (max_up - max_up_fast)
         base_down = max_down_fast + tt * (max_down - max_down_fast)
         s_up_f, s_down_f = apply_variety(base_up, base_down, variety_amount, rng)
-        s_up = int(round(s_up_f))
-        s_down = int(round(s_down_f))
         for t_beat in section:
-            beat_recs.append((t_beat, s_up, s_down, sec_idx))
+            override = override_by_t.get(t_beat)
+            if override is not None:
+                b_up = int(round(override[0]))
+                b_down = int(round(override[1]))
+            else:
+                b_up = int(round(s_up_f))
+                b_down = int(round(s_down_f))
+            beat_recs.append((t_beat, b_up, b_down, sec_idx))
 
     actions: list[dict] = []
     first_t, first_up, first_down, _ = beat_recs[0]

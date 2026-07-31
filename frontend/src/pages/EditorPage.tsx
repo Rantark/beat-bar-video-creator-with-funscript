@@ -421,37 +421,39 @@ export default function EditorPage() {
     if (!meta) return
     const s = meta.sections[secIdx]
     const pattern = meta.patterns[patternIdx]
-    if (!s || !pattern || !pattern.some(Boolean)) return
+    const slots = pattern?.slots ?? []
+    if (!s || !slots.length || !slots.some((sl) => sl.on)) return
     if (!confirm(
       `Replace beats in section ${secIdx + 1} `
       + `(${fmtMs(s.start_ms)}–${fmtMs(s.end_ms)}) `
       + `with pattern ${patternIdx + 1}?`,
     )) return
-    // Emit a beat grid at the section's period, cycling the pattern.
-    // Anchor on the section's stored anchor_ms so this matches how the
-    // original generator laid the beats down.
-    const newAts: number[] = []
+    // Walk the section's beat grid, and for every ON slot emit a
+    // trough at slot.max_down and a peak at the midpoint at slot.max_up.
+    // The peak position stays fixed per-beat instead of interpolating
+    // between adjacent slots — matches what the audio-mode backend
+    // pipeline produces, so re-running the job would give the same shape.
+    type Emit = { at: number; up: number; down: number }
+    const emits: Emit[] = []
     let t = s.anchor_ms
     while (t - s.period_ms >= s.start_ms) t -= s.period_ms
-    let slot = 0
+    let slotIdx = 0
     while (t < s.end_ms) {
-      if (pattern[slot % pattern.length]) newAts.push(Math.round(t))
+      const slot = slots[slotIdx % slots.length]
+      if (slot.on) {
+        emits.push({ at: Math.round(t), up: slot.max_up, down: slot.max_down })
+      }
       t += s.period_ms
-      slot += 1
+      slotIdx += 1
     }
-    // Rebuild the actions inside [start, end] as strict trough/peak
-    // reversals so the toy actually strokes. Match the section's period
-    // to a max_down at the beat and max_up at the midpoint between beats
-    // — same shape beat_actions would have produced.
     const generated: EditAction[] = []
-    const troughPos = 0
-    const peakPos = 100
-    for (let i = 0; i < newAts.length; i++) {
-      generated.push({ id: nextId(), at: newAts[i], pos: troughPos })
-      const nextT = newAts[i + 1] ?? s.end_ms
-      const midT = Math.round((newAts[i] + nextT) / 2)
-      if (midT > newAts[i] && midT < nextT) {
-        generated.push({ id: nextId(), at: midT, pos: peakPos })
+    for (let i = 0; i < emits.length; i++) {
+      const cur = emits[i]
+      generated.push({ id: nextId(), at: cur.at, pos: cur.down })
+      const nextAt = emits[i + 1]?.at ?? s.end_ms
+      const midT = Math.round((cur.at + nextAt) / 2)
+      if (midT > cur.at && midT < nextAt) {
+        generated.push({ id: nextId(), at: midT, pos: cur.up })
       }
     }
     pushHistory()

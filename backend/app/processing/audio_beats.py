@@ -171,15 +171,16 @@ def plan_sections(
 
 
 def _pick_pattern_index_for_period(
-    patterns: list[list[bool]], period_ms: int, rng: random.Random,
+    patterns: list[list[dict]], period_ms: int, rng: random.Random,
 ) -> int:
     """Weighted random pick index into `patterns`. Dense patterns win
     on short-period (fast) sections; sparse patterns win on long-period
-    (slow) sections. See doc in the caller."""
+    (slow) sections. Each pattern is a list of slot dicts with `on`."""
     speed = 1.0 - (max(200, min(1500, period_ms)) - 200) / 1300.0
     weights: list[float] = []
     for p in patterns:
-        density = sum(1 for x in p if x) / len(p)
+        on_count = sum(1 for s in p if s.get("on"))
+        density = on_count / max(1, len(p))
         distance = abs(density - speed)
         weights.append(max(0.05, 1.0 - distance * 2.0))
     total = sum(weights)
@@ -205,9 +206,9 @@ def regularize_beats(
     section_max_ms: int = 30000,
     section_fluctuation: float = 0.0,
     pattern_variety: float = 0.0,
-    patterns: list[list[bool]] | None = None,
+    patterns: list[list[dict]] | None = None,
     min_onsets_per_section: int = 4,
-) -> tuple[list[int], list[dict]]:
+) -> tuple[list[int], list[dict], list[tuple[float, float]] | None]:
     """Quantize raw onsets to a per-section steady tempo.
 
     Splits the timeline into windows sized in 5-second multiples between
@@ -224,12 +225,13 @@ def regularize_beats(
     """
     _ = novelty, novelty_hop_ms  # kept in the signature for API stability
     if not onset_ms or video_duration_ms <= 0:
-        return list(onset_ms), []
+        return list(onset_ms), [], None
 
-    # Drop empty patterns (all-off) — they'd contribute no beats and
-    # would produce a dead section if picked.
-    usable_patterns: list[list[bool]] = [
-        p for p in (patterns or []) if any(p) and len(p) >= 2
+    # Each pattern is a list of slot dicts {on, max_up, max_down}. Drop
+    # patterns whose slots are all off — they'd contribute no beats.
+    usable_patterns: list[list[dict]] = [
+        p for p in (patterns or [])
+        if isinstance(p, list) and len(p) >= 2 and any(s.get("on") for s in p)
     ]
 
     # Deterministic seed so re-runs on the same audio produce the same
@@ -249,7 +251,16 @@ def regularize_beats(
     # move section boundaries around).
     pattern_rng = random.Random(seed ^ 0xA5A5A5A5)
     out: list[int] = []
+    # Parallel to `out`: (max_up, max_down) per emitted beat when a
+    # pattern with per-slot depth is applied. None entries mean "use
+    # the global shape" — the caller can pass this straight into
+    # beat_actions.beats_to_actions as an override list.
+    depth_overrides: list[tuple[float, float] | None] = []
     section_meta: list[dict] = []
+
+    def _emit_raw(times: list[int]) -> None:
+        out.extend(times)
+        depth_overrides.extend(None for _ in times)
 
     for s_start, s_end in sections:
         section_onsets = [t for t in onset_ms if s_start <= t < s_end]
@@ -259,7 +270,7 @@ def regularize_beats(
         if len(section_onsets) < min_onsets_per_section:
             # A few onsets, not enough to lock tempo — pass them through
             # raw rather than inventing a grid from noise.
-            out.extend(section_onsets)
+            _emit_raw(section_onsets)
             continue
 
         # Inter-onset interval histogram, restricted to a musical range
@@ -268,7 +279,7 @@ def regularize_beats(
         iois = np.diff(section_onsets)
         iois = iois[(iois >= 200) & (iois <= 1500)]
         if iois.size < 2:
-            out.extend(section_onsets)
+            _emit_raw(section_onsets)
             continue
 
         bins = np.arange(200, 1501, 25)
@@ -323,14 +334,20 @@ def regularize_beats(
             slot = 0
             t = first_grid
             while t < s_end:
-                if pattern[slot % len(pattern)]:
+                slot_def = pattern[slot % len(pattern)]
+                if slot_def.get("on"):
                     out.append(int(t))
+                    depth_overrides.append((
+                        float(slot_def.get("max_up", 100)),
+                        float(slot_def.get("max_down", 0)),
+                    ))
                 t += period_ms
                 slot += 1
         else:
             t = first_grid
             while t < s_end:
                 out.append(int(t))
+                depth_overrides.append(None)
                 t += period_ms
 
         section_meta.append({
@@ -341,15 +358,25 @@ def regularize_beats(
             "pattern_index": pattern_idx,
         })
 
-    out.sort()
+    # Sort beats + depth overrides together so dedup stays parallel.
+    order = sorted(range(len(out)), key=lambda i: out[i])
+    out_sorted = [out[i] for i in order]
+    dep_sorted = [depth_overrides[i] for i in order]
+
     # Dedup near-duplicates (adjacent sections whose grids meet at a
     # boundary can land within a few ms of each other).
     deduped: list[int] = []
-    for t in out:
+    deduped_deps: list[tuple[float, float] | None] = []
+    for t, d in zip(out_sorted, dep_sorted):
         if deduped and t - deduped[-1] < 100:
             continue
         deduped.append(t)
-    return deduped, section_meta
+        deduped_deps.append(d)
+
+    # If no beat carried an override, return None so the caller can skip
+    # the per-beat depth path entirely (small optimization + clarity).
+    any_override = any(d is not None for d in deduped_deps)
+    return deduped, section_meta, (deduped_deps if any_override else None)
 
 
 def probe_audio_present(video_path: Path) -> bool:

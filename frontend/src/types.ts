@@ -103,17 +103,21 @@ export type Audio = {
   // when the music holds a steady tempo.
   pattern_variety: number
   // User-defined beat patterns applied inside sections. Each pattern
-  // is a fixed-length array of on/off slots; a checked slot emits a
-  // stroke at the section's detected period. Backend picks one pattern
-  // per section, so multiple patterns produce visibly different
-  // rhythms across sections. Empty list = solid grid at detected tempo.
-  patterns: boolean[][]
+  // is a fixed-length array of slots; each slot carries its own
+  // on/off flag plus max_up / max_down depth so a single pattern can
+  // mix shallow and deep strokes. Backend picks one pattern per
+  // section and emits actions using per-slot depth, so consecutive
+  // sections feel rhythmically AND texturally different.
+  patterns: BeatPattern[]
   // Rhythm-game debug overlay: beats scroll right→left across this
   // strip and cross the hit marker at exactly their onset time.
   lookahead_ms: number  // how far ahead the bar shows upcoming beats
   bar_image: string | null   // background of the beat bar (opaque)
   hit_image: string | null   // fixed hit-marker sprite (transparent OK)
   beat_image: string | null  // per-beat sprite (transparent OK)
+  // Global stroke-shape fallbacks. Individual pattern slots override
+  // these via their own max_up / max_down; unpatterned sections use
+  // the global values through the beat_actions pipeline.
   max_up: number
   max_up_fast: number
   max_down_fast: number
@@ -121,6 +125,16 @@ export type Audio = {
   variety_amount: number
   idle_enabled: boolean
   motion_smoothing: number
+}
+
+export type PatternSlot = {
+  on: boolean
+  max_up: number    // 0..100, position at the midpoint upstroke for this slot
+  max_down: number  // 0..100, position at the beat trough for this slot
+}
+
+export type BeatPattern = {
+  slots: PatternSlot[]
 }
 
 export type Job = {
@@ -160,7 +174,7 @@ export type JobSection = {
 
 export type JobMeta = {
   sections: JobSection[]
-  patterns: boolean[][]
+  patterns: BeatPattern[]
 }
 
 export type Preset = {
