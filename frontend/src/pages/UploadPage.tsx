@@ -66,19 +66,19 @@ function LocalPanel() {
   const [status, setStatus] = useState<UploadStatus>('idle')
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [dragActive, setDragActive] = useState(false)
   const navigate = useNavigate()
 
-  async function uploadFile() {
-    if (!file) return
+  async function uploadFileNow(f: File) {
     setStatus('uploading')
     setProgress(0)
     setError(null)
     try {
-      const init = await api.initUpload({ filename: file.name, total_size: file.size })
+      const init = await api.initUpload({ filename: f.name, total_size: f.size })
       for (let i = 0; i < init.total_chunks; i++) {
         const start = i * init.chunk_size
-        const end = Math.min(start + init.chunk_size, file.size)
-        await withRetry(() => api.uploadChunk(init.upload_id, i, file.slice(start, end)), 5)
+        const end = Math.min(start + init.chunk_size, f.size)
+        await withRetry(() => api.uploadChunk(init.upload_id, i, f.slice(start, end)), 5)
         setProgress((i + 1) / init.total_chunks)
       }
       setStatus('finalizing')
@@ -89,6 +89,41 @@ function LocalPanel() {
       setStatus('error')
       setError(e instanceof Error ? e.message : String(e))
     }
+  }
+
+  async function uploadFile() {
+    if (!file) return
+    await uploadFileNow(file)
+  }
+
+  function onDragOver(e: React.DragEvent) {
+    // Must preventDefault on BOTH dragover and drop or the browser
+    // opens the file in a new tab instead of firing our handler.
+    e.preventDefault()
+    if (!dragActive) setDragActive(true)
+  }
+
+  function onDragLeave(e: React.DragEvent) {
+    // Only clear when the drag actually leaves the drop zone, not on
+    // every child-element boundary crossing.
+    if (e.currentTarget === e.target) setDragActive(false)
+  }
+
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault()
+    setDragActive(false)
+    const dropped = Array.from(e.dataTransfer.files || [])
+    // Take the first video-like file. Some OSs report an empty type
+    // for uncommon containers (mkv, etc.), so also accept anything
+    // whose extension looks like a video.
+    const f = dropped.find(
+      (x) => x.type.startsWith('video/')
+        || /\.(mp4|mkv|mov|webm|avi|m4v|wmv|flv)$/i.test(x.name),
+    ) ?? dropped[0]
+    if (!f) return
+    setFile(f)
+    // Auto-start — dropping IS the "go" signal.
+    uploadFileNow(f)
   }
 
   async function usePath() {
@@ -107,15 +142,40 @@ function LocalPanel() {
 
   const busy = status === 'uploading' || status === 'finalizing'
   return (
-    <>
+    <div
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className="relative"
+    >
       <h2 className="text-lg mb-3">Upload from this device</h2>
+      <div
+        onClick={() => !busy && inputRef.current?.click()}
+        className={`w-full mb-3 py-8 rounded-lg border-2 border-dashed text-center cursor-pointer transition-colors ${
+          dragActive
+            ? 'border-indigo-400 bg-indigo-500/10 text-indigo-200'
+            : 'border-slate-700 bg-slate-900 text-slate-400 hover:border-slate-600'
+        } ${busy ? 'opacity-60 pointer-events-none' : ''}`}
+      >
+        <p className="text-sm font-medium">
+          {dragActive ? 'Release to upload' : 'Drop a video here or click to pick a file'}
+        </p>
+        <p className="text-xs mt-1 opacity-70">
+          Upload starts immediately on drop
+        </p>
+      </div>
       <input
         ref={inputRef}
         type="file"
         accept="video/*"
         disabled={busy}
-        onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-        className="w-full text-sm mb-3 file:mr-2 file:px-4 file:py-2 file:rounded file:border-0 file:bg-indigo-600 file:text-white"
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          if (!f) return
+          setFile(f)
+          uploadFileNow(f)
+        }}
+        className="hidden"
       />
       {file && (
         <p className="text-sm text-slate-400 mb-3">
@@ -173,7 +233,7 @@ function LocalPanel() {
       {error && (
         <p className="mt-3 text-sm text-red-400 break-words">{error}</p>
       )}
-    </>
+    </div>
   )
 }
 
