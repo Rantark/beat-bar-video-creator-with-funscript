@@ -23,3 +23,7 @@ backend/storage/*.db*
 .vscode/
 .idea/
 *.swp
+
+# Model weights (auto-downloaded to backend/ or hub cache)
+*.pt
+*.ckpt
