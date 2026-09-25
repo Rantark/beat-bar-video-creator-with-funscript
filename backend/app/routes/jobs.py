@@ -255,6 +255,19 @@ def _rerender_audio_debug(job_id: str) -> None:
         from app.processing.images import decode_data_url
         import numpy as np
 
+        # Downbeats come from the audio-mode meta.json (BEAT This! flagged
+        # them at generation time). We keep the original set even after
+        # editor edits — the measure structure is a property of the song,
+        # not of the current funscript.
+        meta_path = fs_path.with_suffix(".meta.json")
+        stored_downbeats: list[int] = []
+        try:
+            meta_data = json.loads(meta_path.read_text(encoding="utf-8"))
+            raw_dbs = meta_data.get("downbeats_ms") or []
+            stored_downbeats = [int(t) for t in raw_dbs if isinstance(t, (int, float))]
+        except (OSError, json.JSONDecodeError, TypeError):
+            pass
+
         bar_img = decode_data_url(audio_params.get("bar_image"), with_alpha=False)
         hit_img = decode_data_url(audio_params.get("hit_image"), with_alpha=True)
         beat_img = decode_data_url(audio_params.get("beat_image"), with_alpha=True)
@@ -275,6 +288,7 @@ def _rerender_audio_debug(job_id: str) -> None:
             out_path=debug_out,
             beat_frame_indices=beat_frames,
             beat_times_ms=beat_times,
+            downbeat_times_ms=stored_downbeats,
             video_duration_ms=int(video_row["duration_ms"]),
             novelty=np.zeros(0, dtype=np.float32),
             novelty_hop_ms=10.0,

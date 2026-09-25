@@ -71,6 +71,7 @@ def render_audio_debug(
     video_duration_ms: int,
     novelty: np.ndarray,
     novelty_hop_ms: float,
+    downbeat_times_ms: Iterable[int] | None = None,
     bar_image: np.ndarray | None = None,
     hit_image: np.ndarray | None = None,
     beat_image: np.ndarray | None = None,
@@ -100,7 +101,17 @@ def render_audio_debug(
     event_set = set(int(i) for i in beat_frame_indices)
     total_ms = max(1, int(video_duration_ms))
     lookback_ms = 400  # keep beats visible briefly after they hit
-    _ = novelty, novelty_hop_ms  # currently unused in rhythm-game mode
+
+    # Downbeat set for O(1) "is this beat a downbeat" lookup while we
+    # walk the visible window. BEAT This! populates this; the
+    # spectral-flux path leaves it empty.
+    downbeat_set = set(int(t) for t in (downbeat_times_ms or []))
+
+    # Novelty envelope — plotted as a soft glow along the bar so the
+    # visible activity level matches what the detector saw. From
+    # BEAT This! this is the model's frame-level beat probability;
+    # from spectral flux it's a signal-processing proxy.
+    novelty_arr = np.asarray(novelty, dtype=np.float32) if novelty is not None else np.zeros(0, dtype=np.float32)
 
     # Filled on the first draw call when we know the frame size, then
     # reused for every subsequent frame. This was the big win — the
@@ -157,10 +168,30 @@ def render_audio_debug(
         if _cached_total_frames[0] > 0:
             cursor_t_ms = int(frame_idx * (total_ms / _cached_total_frames[0]))
 
-        # Scrolling beats — binary-search the visible window instead of
-        # scanning the full list per frame.
+        # Novelty glow — sample the activation curve across the visible
+        # window and draw a translucent fill up from the bar's baseline.
+        # Height scales with the model's beat probability, so real music
+        # activity is visible even between the discrete beat sprites.
         window_lo = cursor_t_ms - lookback_ms
         window_hi = cursor_t_ms + lookahead_ms
+        if novelty_arr.size and novelty_hop_ms > 0:
+            baseline_y = bar_y + bar_h - 2
+            max_h = max(4, bar_h // 3)
+            step = max(2, (bar_x2 - bar_x1) // 200)
+            for x in range(bar_x1, bar_x2, step):
+                t = cursor_t_ms + int((x - hit_x) / px_per_ms)
+                idx = int(t / novelty_hop_ms)
+                if 0 <= idx < novelty_arr.size:
+                    v = float(novelty_arr[idx])
+                    if v > 0.05:
+                        top = baseline_y - int(v * max_h)
+                        cv2.line(frame, (x, baseline_y), (x, top),
+                                 (80, 200, 80), max(1, step - 1))
+
+        # Scrolling beats — binary-search the visible window instead of
+        # scanning the full list per frame. Downbeats (first beat of
+        # each measure per BEAT This!) render distinctively: a wider
+        # amber sprite / stroke so the measure structure is legible.
         if beats_arr.size:
             lo_i = int(np.searchsorted(beats_arr, window_lo, side="left"))
             hi_i = int(np.searchsorted(beats_arr, window_hi, side="right"))
@@ -169,7 +200,10 @@ def render_audio_debug(
                 x = hit_x + int((t - cursor_t_ms) * px_per_ms)
                 if x < bar_x1 - 40 or x > bar_x2 + 40:
                     continue
-                _draw_beat_sprite_prescaled(frame, x, bar_y, bar_h, cache["beat_prescaled"])
+                if t in downbeat_set:
+                    _draw_downbeat_sprite(frame, x, bar_y, bar_h)
+                else:
+                    _draw_beat_sprite_prescaled(frame, x, bar_y, bar_h, cache["beat_prescaled"])
 
         # Hit marker on top of everything.
         _draw_hit_sprite_prescaled(frame, hit_x, bar_y, bar_h, cache["hit_prescaled"])
@@ -209,6 +243,25 @@ def _draw_beat_sprite_prescaled(
         cv2.circle(frame, (cx, cy), r, (30, 30, 30), 2)
         return
     _paste_bgra_prescaled(frame, sprite, cx, bar_y + bar_h // 2)
+
+
+def _draw_downbeat_sprite(
+    frame: np.ndarray, cx: int, bar_y: int, bar_h: int,
+) -> None:
+    """Wider amber-colored marker for downbeats (first beat of each
+    measure per BEAT This!). No user sprite override — the whole point
+    is that this looks visually distinct from the beat sprite so measure
+    structure is legible even with a custom beat image loaded."""
+    cy = bar_y + bar_h // 2
+    r = max(9, bar_h // 2)
+    # Filled amber with a dark outer ring and a bright core dot.
+    cv2.circle(frame, (cx, cy), r, (30, 180, 240), -1)
+    cv2.circle(frame, (cx, cy), r, (10, 40, 80), 2)
+    cv2.circle(frame, (cx, cy), max(2, r // 3), (255, 255, 255), -1)
+    # Vertical stem so it's obvious even at low bar heights or if
+    # densely packed with regular beats around it.
+    cv2.line(frame, (cx, bar_y - 4), (cx, bar_y + bar_h + 4),
+             (30, 180, 240), 2)
 
 
 def _draw_hit_sprite_prescaled(

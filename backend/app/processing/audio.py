@@ -122,17 +122,26 @@ class AudioProcessor:
             progress_cb(1.0)
             return
 
+        # `downbeat_ms` — only populated when the neural tracker runs.
+        # BEAT This! flags the first beat of each measure; we pass those
+        # through to the debug renderer so the beat bar can visualize
+        # them distinctively (bigger tick, different color). The
+        # spectral-flux path doesn't have a notion of measure structure,
+        # so it stays empty there.
+        downbeat_ms: list[int] = []
         if use_neural:
-            # Learned beat tracker — onset envelope + autocorrelation
-            # tempo estimator + dynamic-programming beat picker. Handles
-            # tempo changes, syncopation, and quiet passages far better
-            # than raw spectral-flux peak-picking. Falls back to the
-            # spectral-flux path if librosa fails to import so the job
-            # still completes on a broken install.
+            # SOTA neural beat tracker (BEAT This! 2024). Handles tempo
+            # drift, syncopation, live/acoustic material, and heavy
+            # electronic mixes far better than signal-processing
+            # baselines. Falls back to the spectral-flux path if the
+            # `beat_this` package isn't installed so the job still
+            # completes on a stripped-down install.
             try:
                 from app.processing import audio_beats_neural
-                onset_ms, novelty, hop_ms = audio_beats_neural.detect_onsets_neural(
-                    pcm, 22050, tightness=neural_tightness,
+                onset_ms, downbeat_ms, novelty, hop_ms = (
+                    audio_beats_neural.detect_beats_neural(
+                        pcm, 22050, use_dbn=neural_tightness >= 200,
+                    )
                 )
             except ImportError:
                 onset_ms, novelty, hop_ms = audio_beats.detect_onsets(
@@ -153,6 +162,7 @@ class AudioProcessor:
         # Clamp onset times to video duration — audio streams occasionally
         # run a few ms longer than the video track.
         onset_ms = [t for t in onset_ms if 0 <= t <= video.duration_ms]
+        downbeat_ms = [t for t in downbeat_ms if 0 <= t <= video.duration_ms]
 
         # Regularize: lock a steady tempo per ~20s section so the toy
         # doesn't chase every incidental sound. Sections with too few
@@ -185,10 +195,14 @@ class AudioProcessor:
         # Persist section + pattern metadata next to the funscript so
         # the editor can draw section boundaries, jump to a section by
         # button, and re-apply a pattern to a specific section.
+        # Downbeats are persisted too — the editor's rebuild-beat-bar
+        # feature reuses them so the bar keeps showing measure structure
+        # even after user edits reshape the underlying funscript.
         meta_path = out_path.with_suffix(".meta.json")
         meta_path.write_text(json.dumps({
             "sections": section_meta,
             "patterns": patterns,
+            "downbeats_ms": downbeat_ms,
         }), encoding="utf-8")
 
         progress_cb(0.85)
@@ -213,6 +227,7 @@ class AudioProcessor:
                 out_path=debug_out_path,
                 beat_frame_indices=beat_frames,
                 beat_times_ms=onset_ms,
+                downbeat_times_ms=downbeat_ms,
                 video_duration_ms=video.duration_ms,
                 novelty=novelty,
                 novelty_hop_ms=hop_ms,
