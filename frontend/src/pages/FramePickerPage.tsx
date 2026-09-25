@@ -118,6 +118,8 @@ export default function FramePickerPage() {
     invert: false,
     resize_max: 640,
     device: 'auto',
+    detect_scene_cuts: true,
+    scene_cut_threshold: 0.35,
   })
   function updatePose(patch: Partial<Pose>) {
     setPose((prev) => ({ ...prev, ...patch }))
@@ -672,10 +674,14 @@ export default function FramePickerPage() {
         <div className="mt-3">
           <p className="text-sm text-slate-400">
             YOLOv8-pose finds the person in each frame and tracks 17
-            body keypoints. Pick which keypoint's motion drives the
-            funscript — "auto" scans the whole clip and picks the one
-            that moved the most on the chosen axis. No spatial
-            placement needed; the neural detector handles that itself.
+            body keypoints. Pick a single keypoint (like{' '}
+            <span className="font-mono">left_hip</span>), a keypoint
+            group (like <span className="font-mono">torso</span>, which
+            averages both shoulders + both hips for occlusion
+            robustness), or <span className="font-mono">auto</span>{' '}
+            to let the pipeline pick whichever raw keypoint moved the
+            most. No spatial placement needed; the neural detector
+            handles that itself.
           </p>
           <p className="mt-2 text-xs text-amber-300 bg-amber-950/30 border border-amber-800/40 rounded p-2">
             Requires the <span className="font-mono">[pose]</span>
@@ -753,6 +759,49 @@ export default function FramePickerPage() {
               spot on CPU. Higher = more accurate on small-in-frame
               subjects, dramatically slower.
             </p>
+          </div>
+
+          <div className="mt-4 pt-3 border-t border-slate-800">
+            <p className="text-xs uppercase tracking-wide text-slate-500 mb-2">
+              Scene / angle changes
+            </p>
+            <label className="flex items-center gap-3 text-sm text-slate-300 touch-manipulation">
+              <input
+                type="checkbox"
+                checked={pose.detect_scene_cuts}
+                onChange={(e) => updatePose({ detect_scene_cuts: e.target.checked })}
+                className="w-5 h-5 accent-indigo-500"
+              />
+              <span>
+                Detect scene cuts and normalize per scene
+                <span className="text-slate-500 ml-2">
+                  (splits the video at hard visual cuts so each camera
+                  angle gets its own rolling range — big quality win on
+                  multi-cut compilations and angle changes.)
+                </span>
+              </span>
+            </label>
+            <div className={`mt-3 ${pose.detect_scene_cuts ? '' : 'opacity-40 pointer-events-none'}`}>
+              <div className="flex justify-between text-xs text-slate-400 mb-1">
+                <span>Cut sensitivity</span>
+                <span className="font-mono">
+                  {Math.round(pose.scene_cut_threshold * 100)}%
+                </span>
+              </div>
+              <input
+                type="range" min={50} max={800} step={10}
+                value={Math.round(pose.scene_cut_threshold * 1000)}
+                onChange={(e) => updatePose({
+                  scene_cut_threshold: parseInt(e.target.value, 10) / 1000,
+                })}
+                className="w-full touch-none"
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Lower = more sensitive (catches subtle transitions but
+                may over-split on flashy content). Higher = only hard
+                cuts count. Default 35% works well for most content.
+              </p>
+            </div>
           </div>
 
           <DeviceSelect

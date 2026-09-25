@@ -67,15 +67,21 @@ def render_pose_debug(
     source_video: Path,
     out_path: Path,
     xy_series: "list",
-    keypoint_index: int,
+    highlight_keypoints: "list[int]",
     axis: str,
     scale: float,
     reversal_frame_indices: Iterable[int],
+    scene_cut_frames: Iterable[int] = (),
 ) -> None:
-    """Draw the pose skeleton on every frame plus a highlighted marker
-    on the chosen keypoint. Coordinates in xy_series are in the
-    resized inference frame — we rescale back to source pixels before
-    drawing so the overlay lines up with what the user sees.
+    """Draw the pose skeleton on every frame plus a highlighted ring on
+    each tracked keypoint (multiple for group targets like "torso").
+    A brief cyan flash marks each detected scene cut so the user can
+    verify that per-scene normalization is being triggered where they
+    expect.
+
+    Coordinates in xy_series are in the resized inference frame — we
+    rescale back to source pixels before drawing so the overlay lines
+    up with what the user sees.
 
     COCO-17 skeleton edges (indices into the keypoint list):
       face   : (0,1) (0,2) (1,3) (2,4)
@@ -84,6 +90,7 @@ def render_pose_debug(
       legs   : (11,13) (13,15) (12,14) (14,16)
     """
     events = set(int(i) for i in reversal_frame_indices)
+    cut_set = set(int(i) for i in scene_cut_frames if int(i) > 0)
     inv_scale = 1.0 / scale if scale > 0 else 1.0
     skeleton = [
         (0, 1), (0, 2), (1, 3), (2, 4),
@@ -91,8 +98,14 @@ def render_pose_debug(
         (5, 6), (5, 11), (6, 12), (11, 12),
         (11, 13), (13, 15), (12, 14), (14, 16),
     ]
+    highlight = list(highlight_keypoints)
+    # Cut markers stay visible for ~500ms after firing so the user can
+    # actually see them at typical playback speeds.
+    cut_flash_state = {"frames_left": 0}
 
     def draw(frame: np.ndarray, frame_idx: int, flash_left: int) -> int:
+        if frame_idx in cut_set:
+            cut_flash_state["frames_left"] = 15
         if 0 <= frame_idx < len(xy_series):
             kpts = xy_series[frame_idx]
             if kpts is not None:
@@ -104,15 +117,29 @@ def render_pose_debug(
                 for i, p in enumerate(pts):
                     if (p != 0).any():
                         cv2.circle(frame, tuple(p), 3, (255, 255, 255), -1)
-                # Chosen keypoint gets a big magenta ring so the user
-                # can see exactly which anatomy the signal is coming from.
-                chosen = pts[keypoint_index]
-                if (chosen != 0).any():
-                    cv2.circle(frame, tuple(chosen), 12, (255, 40, 200), 3)
-                    label = f"kp {keypoint_index} · axis {axis}"
-                    cv2.putText(frame, label, (12, 32),
+                for kp_idx in highlight:
+                    if 0 <= kp_idx < len(pts):
+                        chosen = pts[kp_idx]
+                        if (chosen != 0).any():
+                            cv2.circle(frame, tuple(chosen), 12, (255, 40, 200), 3)
+                if highlight:
+                    kp_label = ("kp " + ",".join(str(k) for k in highlight)
+                                if len(highlight) <= 4 else f"group of {len(highlight)}")
+                    cv2.putText(frame, f"{kp_label} · axis {axis}", (12, 32),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.7,
                                 (255, 40, 200), 2, cv2.LINE_AA)
+        # Scene-cut banner along the top edge — bright cyan strip when
+        # a cut just fired, fades over ~15 frames.
+        if cut_flash_state["frames_left"] > 0:
+            alpha = cut_flash_state["frames_left"] / 15.0
+            h, w = frame.shape[:2]
+            overlay = frame.copy()
+            cv2.rectangle(overlay, (0, 0), (w, 12), (255, 220, 0), -1)
+            cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, dst=frame)
+            cv2.putText(frame, "SCENE CUT", (w - 200, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                        (255, 220, 0), 2, cv2.LINE_AA)
+            cut_flash_state["frames_left"] -= 1
         if frame_idx in events:
             flash_left = 0
         return flash_left

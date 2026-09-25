@@ -55,6 +55,24 @@ KEYPOINT_NAMES = [
     "left_knee", "right_knee", "left_ankle", "right_ankle",
 ]
 
+# Keypoint groups — averaging multiple keypoints' motion produces a
+# signal that's robust against single-point occlusion during angle
+# changes (e.g. one wrist goes behind the subject, the other keeps
+# tracking). The user picks either a single keypoint by name, one of
+# these group names, or "auto" for whichever raw keypoint has the
+# largest vertical variance across the clip.
+KEYPOINT_GROUPS: dict[str, list[int]] = {
+    "torso":     [5, 6, 11, 12],   # shoulders + hips
+    "hips":      [11, 12],
+    "shoulders": [5, 6],
+    "wrists":    [9, 10],
+    "elbows":    [7, 8],
+    "knees":     [13, 14],
+    "ankles":    [15, 16],
+    "arms":      [7, 8, 9, 10],    # elbows + wrists
+    "legs":      [13, 14, 15, 16], # knees + ankles
+}
+
 
 class PoseProcessor:
     def run(
@@ -71,6 +89,8 @@ class PoseProcessor:
         confidence = float(pose.get("confidence_threshold", 0.3))
         invert = bool(pose.get("invert", False))
         resize_max = int(pose.get("resize_max", 640))  # long-edge cap for speed
+        detect_cuts = bool(pose.get("detect_scene_cuts", True))
+        cut_threshold = max(0.05, min(0.9, float(pose.get("scene_cut_threshold", 0.35))))
         device, device_note = resolve_device(pose.get("device"))
         if device_note:
             print(f"[pose] {device_note}", flush=True)
@@ -117,6 +137,12 @@ class PoseProcessor:
         infer_h = int(h0 * scale)
 
         xy_series: list[np.ndarray | None] = []
+        # Frame indices where a hard cut was detected. Includes 0 (start
+        # of the clip is always a "cut" for normalization purposes) and
+        # is used later to split xy_series into per-scene chunks so
+        # each camera angle gets its own rolling range.
+        cut_frames: list[int] = [0]
+        prev_hist: np.ndarray | None = None
         # Last chosen person centroid — helps re-lock to the same person
         # after brief occlusions. Simple heuristic: nearest centroid wins.
         last_centroid: tuple[float, float] | None = None
@@ -154,6 +180,34 @@ class PoseProcessor:
                     break
                 if scale < 1.0:
                     frame = cv2.resize(frame, (infer_w, infer_h), interpolation=cv2.INTER_AREA)
+
+                # Scene-cut detection — cheap 8-bin-per-channel histogram
+                # of the already-resized frame, compared with the previous
+                # frame's via correlation. A big drop in correlation means
+                # the visible pixels changed dramatically = hard cut. We
+                # store the frame index; downstream signal processing uses
+                # these to segment the funscript into per-scene chunks
+                # with independent rolling ranges.
+                if detect_cuts:
+                    hist = cv2.calcHist(
+                        [frame], [0, 1, 2], None, [8, 8, 8],
+                        [0, 256, 0, 256, 0, 256],
+                    )
+                    cv2.normalize(hist, hist)
+                    if prev_hist is not None:
+                        correlation = float(cv2.compareHist(
+                            prev_hist, hist, cv2.HISTCMP_CORREL,
+                        ))
+                        # correlation near 1.0 = similar frames; < threshold
+                        # means the scene changed. Also require a minimum
+                        # distance between cuts (0.5s) so a flashy strobe
+                        # doesn't spam boundaries.
+                        min_gap = int(fps * 0.5)
+                        if correlation < (1.0 - cut_threshold) and \
+                                (frame_idx - cut_frames[-1]) > min_gap:
+                            cut_frames.append(frame_idx)
+                    prev_hist = hist
+
                 frame_buffer.append(frame)
                 frame_idx += 1
                 if len(frame_buffer) >= batch:
@@ -173,24 +227,39 @@ class PoseProcessor:
             progress_cb(1.0)
             return
 
-        # Pick which keypoint to actually use. "auto" scans every keypoint
-        # and picks the one with the highest vertical range across the clip.
-        kp_idx = _resolve_keypoint(keypoint, xy_series)
+        # Resolve the tracked keypoint. Result is either:
+        #  * a single index (0..16) for a raw keypoint,
+        #  * a list of indices for a group (torso, wrists, etc.) whose
+        #    per-frame position is the mean of visible member points.
+        kp_target = _resolve_keypoint_target(keypoint, xy_series)
 
         # Extract the chosen coordinate per frame. Missing frames become
         # NaN; we linearly interpolate through the gaps so the smoothing
-        # step has a continuous signal.
+        # step has a continuous signal. When kp_target is a group, we
+        # average across the group's keypoints — a single-point occlusion
+        # (a wrist behind the subject during an angle change) doesn't
+        # take out the whole frame.
         signal = np.full(n, np.nan, dtype=np.float64)
         for i, kpts in enumerate(xy_series):
             if kpts is None:
                 continue
-            x, y = float(kpts[kp_idx][0]), float(kpts[kp_idx][1])
+            if isinstance(kp_target, list):
+                # Ignore (0, 0) placeholder points — YOLO uses those when
+                # a keypoint has zero confidence, which would drag the
+                # mean toward the frame origin.
+                pts = np.asarray([kpts[k] for k in kp_target], dtype=np.float64)
+                mask = (pts.sum(axis=1) > 0)
+                if not mask.any():
+                    continue
+                pts = pts[mask]
+                x, y = float(pts[:, 0].mean()), float(pts[:, 1].mean())
+            else:
+                x, y = float(kpts[kp_target][0]), float(kpts[kp_target][1])
+                if x == 0 and y == 0:
+                    continue
             if axis == "x":
                 signal[i] = x
             elif axis == "magnitude":
-                # Distance from origin — usually not the right choice by
-                # itself, but combined with keypoint="wrist" it can track
-                # a swinging hand better than either axis alone.
                 signal[i] = float(np.hypot(x, y))
             else:  # y
                 signal[i] = y
@@ -206,20 +275,51 @@ class PoseProcessor:
         if scale < 1.0:
             signal = signal / scale
 
-        actions, reversal_indices = _signal_to_actions(signal, fps, invert=invert)
+        # Per-scene signal → actions. Each scene between adjacent
+        # `cut_frames` boundaries is normalized independently so the
+        # rolling range from one camera angle doesn't rescale another.
+        scene_bounds = _scene_bounds_from_cuts(cut_frames, n)
+        actions: list[dict] = []
+        reversal_indices: list[int] = []
+        for s_start, s_end in scene_bounds:
+            if s_end - s_start < 4:
+                continue
+            scene_signal = signal[s_start:s_end]
+            scene_actions, scene_reversals = _signal_to_actions(
+                scene_signal, fps, invert=invert, time_offset_frames=s_start,
+            )
+            actions.extend(scene_actions)
+            reversal_indices.extend(scene_reversals)
+
+        if not actions:
+            actions = [{"at": 0, "pos": 50}]
+
+        # De-collide timestamps that adjacent-scene concatenation may
+        # have produced when a scene boundary landed exactly between
+        # two frames.
+        actions.sort(key=lambda a: a["at"])
+        for i in range(1, len(actions)):
+            if actions[i]["at"] <= actions[i - 1]["at"]:
+                actions[i]["at"] = actions[i - 1]["at"] + 1
+
         write_funscript(out_path, actions)
 
         if debug_out_path is not None:
             from app.processing.debug import render_pose_debug
             progress_cb(0.92)
+            # Debug renderer wants a list of highlighted keypoint indices —
+            # single-keypoint mode gets a one-item list so the drawing
+            # code has one shape to reason about.
+            highlight = kp_target if isinstance(kp_target, list) else [kp_target]
             render_pose_debug(
                 source_video=video.path,
                 out_path=debug_out_path,
                 xy_series=xy_series,
-                keypoint_index=kp_idx,
+                highlight_keypoints=highlight,
                 axis=axis,
                 scale=scale,
                 reversal_frame_indices=reversal_indices,
+                scene_cut_frames=cut_frames if detect_cuts else [],
             )
         progress_cb(1.0)
 
@@ -251,14 +351,21 @@ def _pick_person(res, last_centroid: tuple[float, float] | None) -> np.ndarray |
     return all_kpts[int(np.argmin(dists))]
 
 
-def _resolve_keypoint(spec, xy_series) -> int:
-    """Turn a name, int, or 'auto' into an integer keypoint index."""
+def _resolve_keypoint_target(spec, xy_series):
+    """Resolve the pose keypoint spec into either an int (single point)
+    or a list of ints (group). Accepts:
+      * int in [0, 17)                — that raw keypoint
+      * "auto"                        — scan and pick the highest-std one
+      * a KEYPOINT_NAMES entry        — that raw keypoint
+      * a KEYPOINT_GROUPS key         — that group of keypoints
+    Falls back to left_hip if nothing matches.
+    """
     if isinstance(spec, int) and 0 <= spec < 17:
         return spec
     if isinstance(spec, str):
+        if spec in KEYPOINT_GROUPS:
+            return list(KEYPOINT_GROUPS[spec])
         if spec == "auto":
-            # Pick the keypoint with the largest vertical std across the
-            # clip — that's the one most likely to carry rhythmic motion.
             ys = np.full((17, len(xy_series)), np.nan, dtype=np.float64)
             for i, kpts in enumerate(xy_series):
                 if kpts is None:
@@ -270,6 +377,20 @@ def _resolve_keypoint(spec, xy_series) -> int:
         if spec in KEYPOINT_NAMES:
             return KEYPOINT_NAMES.index(spec)
     return KEYPOINT_NAMES.index("left_hip")
+
+
+def _scene_bounds_from_cuts(cut_frames: list[int], n_frames: int) -> list[tuple[int, int]]:
+    """Turn a list of cut frame indices into (start, end) pairs covering
+    [0, n_frames). Always includes the final segment even when the last
+    cut is followed by more frames."""
+    if not cut_frames or cut_frames[0] != 0:
+        cut_frames = [0] + list(cut_frames)
+    bounds: list[tuple[int, int]] = []
+    for i, start in enumerate(cut_frames):
+        end = cut_frames[i + 1] if i + 1 < len(cut_frames) else n_frames
+        if end > start:
+            bounds.append((start, end))
+    return bounds
 
 
 def _fill_nans(arr: np.ndarray) -> np.ndarray | None:
@@ -284,11 +405,17 @@ def _fill_nans(arr: np.ndarray) -> np.ndarray | None:
 
 def _signal_to_actions(
     positions: np.ndarray, fps: float, *, invert: bool = False,
+    time_offset_frames: int = 0,
 ) -> tuple[list[dict], list[int]]:
     """Same shape/normalization/peak-detection pipeline zone mode uses.
     Kept local (rather than imported from zone.py) so pose mode is
     self-contained and easy to tune without leaking regressions into
-    the older modes."""
+    the older modes.
+
+    `time_offset_frames` shifts the output timestamps/indices by that
+    many source frames — the caller uses this to stitch per-scene
+    results back into a single funscript with correct absolute times.
+    """
     window = settings.smoothing_window
     polyorder = settings.smoothing_polyorder
     if window % 2 == 0:
@@ -324,10 +451,11 @@ def _signal_to_actions(
     )
     indices = sorted(int(i) for i in list(peaks) + list(troughs))
     if not indices:
-        return [{"at": 0, "pos": 50}], []
+        return [], []
     actions: list[dict] = []
     for i in indices:
-        at_ms = int(round(i / fps * 1000))
+        absolute_frame = i + time_offset_frames
+        at_ms = int(round(absolute_frame / fps * 1000))
         pos = int(round(float(normalized[i])))
         actions.append({"at": at_ms, "pos": max(0, min(100, pos))})
     deduped: list[dict] = []
@@ -335,4 +463,6 @@ def _signal_to_actions(
         if deduped and a["at"] <= deduped[-1]["at"]:
             a["at"] = deduped[-1]["at"] + 1
         deduped.append(a)
-    return deduped, indices
+    # Return absolute frame indices for the debug renderer's flash cues.
+    absolute_indices = [i + time_offset_frames for i in indices]
+    return deduped, absolute_indices

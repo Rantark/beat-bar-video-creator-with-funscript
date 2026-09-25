@@ -82,12 +82,18 @@ export type Pose = {
   // Which of the 17 COCO keypoints drives the funscript. "auto" picks
   // the keypoint whose vertical position moves the most across the
   // clip — usually the right answer for whole-body rhythmic content.
-  keypoint: string          // "auto" or a keypoint name
+  keypoint: string          // "auto", a keypoint name, or a group name
   axis: 'y' | 'x' | 'magnitude'
   confidence_threshold: number  // 0..1; per-frame detection min conf
   invert: boolean
   resize_max: number        // long-edge cap for inference (speed knob)
   device: DeviceChoice
+  // Scene-cut detection: split the video at hard visual cuts and
+  // normalize each scene independently. Fixes angle changes where the
+  // rolling range from one camera setup would otherwise rescale
+  // another and flatten out real motion.
+  detect_scene_cuts: boolean
+  scene_cut_threshold: number  // 0.05..0.9; lower = more cuts detected
 }
 
 export type DeviceChoice = 'auto' | 'cpu' | 'cuda'
@@ -101,6 +107,11 @@ export type DeviceState = {
 
 export const POSE_KEYPOINTS = [
   'auto',
+  // Groups — average multiple keypoints for robustness against
+  // single-point occlusion when the camera angle changes.
+  'torso', 'hips', 'shoulders', 'wrists', 'elbows',
+  'knees', 'ankles', 'arms', 'legs',
+  // Single keypoints (COCO-17).
   'nose', 'left_eye', 'right_eye', 'left_ear', 'right_ear',
   'left_shoulder', 'right_shoulder', 'left_elbow', 'right_elbow',
   'left_wrist', 'right_wrist', 'left_hip', 'right_hip',
