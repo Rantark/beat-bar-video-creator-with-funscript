@@ -21,10 +21,14 @@ player. An in-browser editor covers the last-mile fixes.
   inner-vs-outer color contrast, HSV distance, and (optionally) a
   captured template image so it works on translucent markers over
   animated backgrounds.
-- **Audio** — spectral-flux onset detection on the video's audio track.
-  Regularized into 5–60 s sections of stable tempo, with a fully
-  configurable rhythm-game-style visual bar rendered onto the debug MP4
-  (custom sprites for the bar background, hit marker, and beat).
+- **Audio** — beat detection on the video's audio track. Two engines:
+  a fast spectral-flux onset detector (built-in), or a learned beat
+  tracker (librosa: onset envelope + tempo autocorrelation + dynamic-
+  programming beat picker, more accurate on real music — install with
+  `pip install -e .[neural]`). Beats get regularized into 5–60 s
+  sections of stable tempo, with a fully configurable rhythm-game-style
+  visual bar rendered onto the debug MP4 (custom sprites for the bar
+  background, hit marker, and beat).
 
 **Editor**
 

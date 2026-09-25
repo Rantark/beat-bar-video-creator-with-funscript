@@ -74,6 +74,8 @@ export default function FramePickerPage() {
     min_gap_ms: 120,
     low_hz: 60,
     high_hz: 8000,
+    use_neural: false,
+    neural_tightness: 100,
     regularize: true,
     section_min_ms: 10000,
     section_target_ms: 20000,
@@ -434,6 +436,54 @@ export default function FramePickerPage() {
             Kicks live below 200 Hz; snares/hats 200–8000. Voice-heavy content:
             try 100–500 Hz.
           </p>
+
+          <div className="mt-5 pt-3 border-t border-slate-800">
+            <p className="text-xs uppercase tracking-wide text-slate-500 mb-2">
+              Detection engine
+            </p>
+            <label className="flex items-center gap-3 text-sm text-slate-300 touch-manipulation">
+              <input
+                type="checkbox"
+                checked={audio.use_neural}
+                onChange={(e) => updateAudio({ use_neural: e.target.checked })}
+                className="w-5 h-5 accent-indigo-500"
+              />
+              <span>
+                Neural beat tracker
+                <span className="text-slate-500 ml-2">
+                  (learned tempo prior + dynamic-programming beat picker,
+                  more accurate on real music — slower, requires the
+                  [neural] backend install)
+                </span>
+              </span>
+            </label>
+            <div className={`mt-3 ${audio.use_neural ? '' : 'opacity-40 pointer-events-none'}`}>
+              <div className="flex justify-between text-xs text-slate-400 mb-1">
+                <span>Tempo tightness</span>
+                <span className="font-mono">{audio.neural_tightness}</span>
+              </div>
+              <input
+                type="range" min={20} max={400} step={10}
+                value={audio.neural_tightness}
+                onChange={(e) => updateAudio({
+                  neural_tightness: parseInt(e.target.value, 10) || 100,
+                })}
+                className="w-full touch-none"
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Higher = picker sticks harder to the estimated tempo
+                (good for steady electronic tracks). Lower = more
+                flexible to tempo drift (good for live/acoustic music).
+                Default 100.
+              </p>
+            </div>
+            <p className="mt-3 text-xs text-slate-500">
+              With this off, audio-mode uses the raw spectral-flux
+              onset detector (faster, always available, less musically
+              accurate). The sensitivity / min-gap / frequency-band
+              knobs above apply to the spectral-flux path only.
+            </p>
+          </div>
 
           <div className="mt-5 pt-3 border-t border-slate-800">
             <p className="text-xs uppercase tracking-wide text-slate-500 mb-2">

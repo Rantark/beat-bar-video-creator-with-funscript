@@ -24,6 +24,12 @@ scipy>=1.13
 # they don't have to be manually downloaded first.
 yt-dlp>=2024.10
 
+# Optional: learned beat tracker for audio mode (Use neural beat tracker
+# toggle in the Audio panel). Pulls in numba + scikit-learn — ~120 MB
+# on top of the base install. Job falls back to spectral-flux detection
+# if librosa isn't installed, so this is genuinely optional.
+librosa>=1.0
+
 # Desktop-app launcher (start-desktop.bat / backend/desktop.py). Only
 # needed if you want a native window instead of the browser tab.
 # Windows uses WebView2 (bundled with Windows 10 21H1+ / Windows 11).

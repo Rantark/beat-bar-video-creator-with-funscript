@@ -94,6 +94,8 @@ class AudioProcessor:
         section_max_ms = max(section_target_ms, int(audio.get("section_max_ms", 30000)))
         section_fluctuation = max(0.0, min(1.0, float(audio.get("section_fluctuation", 0.0))))
         pattern_variety = max(0.0, min(1.0, float(audio.get("pattern_variety", 0.0))))
+        use_neural = bool(audio.get("use_neural", False))
+        neural_tightness = max(10.0, min(500.0, float(audio.get("neural_tightness", 100.0))))
 
         # User-defined beat patterns. Two accepted shapes:
         #   * Legacy: [[true, false, true], ...] — a list of boolean
@@ -120,13 +122,32 @@ class AudioProcessor:
             progress_cb(1.0)
             return
 
-        onset_ms, novelty, hop_ms = audio_beats.detect_onsets(
-            pcm, 22050,
-            sensitivity=sensitivity,
-            min_gap_ms=min_gap_ms,
-            low_hz=low_hz,
-            high_hz=high_hz,
-        )
+        if use_neural:
+            # Learned beat tracker — onset envelope + autocorrelation
+            # tempo estimator + dynamic-programming beat picker. Handles
+            # tempo changes, syncopation, and quiet passages far better
+            # than raw spectral-flux peak-picking. Falls back to the
+            # spectral-flux path if librosa fails to import so the job
+            # still completes on a broken install.
+            try:
+                from app.processing import audio_beats_neural
+                onset_ms, novelty, hop_ms = audio_beats_neural.detect_onsets_neural(
+                    pcm, 22050, tightness=neural_tightness,
+                )
+            except ImportError:
+                onset_ms, novelty, hop_ms = audio_beats.detect_onsets(
+                    pcm, 22050,
+                    sensitivity=sensitivity, min_gap_ms=min_gap_ms,
+                    low_hz=low_hz, high_hz=high_hz,
+                )
+        else:
+            onset_ms, novelty, hop_ms = audio_beats.detect_onsets(
+                pcm, 22050,
+                sensitivity=sensitivity,
+                min_gap_ms=min_gap_ms,
+                low_hz=low_hz,
+                high_hz=high_hz,
+            )
         progress_cb(0.7)
 
         # Clamp onset times to video duration — audio streams occasionally

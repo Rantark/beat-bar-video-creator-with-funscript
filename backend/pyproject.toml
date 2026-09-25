@@ -22,6 +22,9 @@ dev = ["ruff>=0.7"]
 # Optional: install with `pip install -e .[desktop]` to enable the
 # native-window launcher (backend/desktop.py).
 desktop = ["pywebview>=5.3"]
+# Optional: install with `pip install -e .[neural]` to enable the
+# learned beat tracker in Audio mode. Adds ~120 MB (numba, scikit-learn).
+neural = ["librosa>=1.0"]
 
 [build-system]
 requires = ["setuptools>=68"]

@@ -83,6 +83,14 @@ export type Audio = {
   min_gap_ms: number    // refractory period between onsets
   low_hz: number        // spectral band low edge
   high_hz: number       // spectral band high edge
+  // Learned beat tracker (librosa) instead of raw spectral-flux
+  // peak-picking. Handles tempo changes, syncopation, and quiet
+  // passages more accurately. Requires the [neural] optional install.
+  use_neural: boolean
+  // Rigidity of the beat-picker's tempo prior. Higher = the picker
+  // sticks harder to the estimated tempo, useful when a song has a
+  // steady beat under a busy surface.
+  neural_tightness: number
   // Regularization: split the track into ~section_target_ms windows,
   // lock a steady tempo per window, emit a phase-aligned grid. Turns
   // spontaneous onset detection into a rhythm-game-style chart with
