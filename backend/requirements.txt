@@ -24,11 +24,11 @@ scipy>=1.13
 # they don't have to be manually downloaded first.
 yt-dlp>=2024.10
 
-# Optional: learned beat tracker for audio mode (Use neural beat tracker
-# toggle in the Audio panel). Pulls in numba + scikit-learn — ~120 MB
-# on top of the base install. Job falls back to spectral-flux detection
-# if librosa isn't installed, so this is genuinely optional.
-librosa>=1.0
+# Optional: SOTA neural beat tracker (CPJKU BEAT This, 2024) for audio
+# mode. Pulls in PyTorch + torchaudio (~250 MB CPU-only) plus a ~30 MB
+# model auto-downloaded on first use. Job falls back to spectral-flux
+# detection if beat_this isn't installed, so this is genuinely optional.
+beat_this>=1.1
 
 # Desktop-app launcher (start-desktop.bat / backend/desktop.py). Only
 # needed if you want a native window instead of the browser tab.

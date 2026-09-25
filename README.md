@@ -22,13 +22,14 @@ player. An in-browser editor covers the last-mile fixes.
   captured template image so it works on translucent markers over
   animated backgrounds.
 - **Audio** — beat detection on the video's audio track. Two engines:
-  a fast spectral-flux onset detector (built-in), or a learned beat
-  tracker (librosa: onset envelope + tempo autocorrelation + dynamic-
-  programming beat picker, more accurate on real music — install with
-  `pip install -e .[neural]`). Beats get regularized into 5–60 s
-  sections of stable tempo, with a fully configurable rhythm-game-style
-  visual bar rendered onto the debug MP4 (custom sprites for the bar
-  background, hit marker, and beat).
+  a fast spectral-flux onset detector (built-in), or a SOTA neural
+  beat tracker (CPJKU's BEAT This! 2024 transformer, current
+  state-of-the-art on public benchmarks — install with
+  `pip install -e .[neural]`, ~250 MB for PyTorch + torchaudio, then
+  the 30 MB model auto-downloads on first use). Beats get regularized
+  into 5–60 s sections of stable tempo, with a fully configurable
+  rhythm-game-style visual bar rendered onto the debug MP4 (custom
+  sprites for the bar background, hit marker, and beat).
 
 **Editor**
 

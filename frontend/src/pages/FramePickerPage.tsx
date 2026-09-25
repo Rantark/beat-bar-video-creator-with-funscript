@@ -449,33 +449,34 @@ export default function FramePickerPage() {
                 className="w-5 h-5 accent-indigo-500"
               />
               <span>
-                Neural beat tracker
+                Neural beat tracker (BEAT This!)
                 <span className="text-slate-500 ml-2">
-                  (learned tempo prior + dynamic-programming beat picker,
-                  more accurate on real music — slower, requires the
-                  [neural] backend install)
+                  (CPJKU's 2024 transformer, current SOTA — accurate
+                  on real music, live performances, tempo drift and
+                  syncopation. Slower and requires the [neural]
+                  backend install; model auto-downloads on first use.)
                 </span>
               </span>
             </label>
             <div className={`mt-3 ${audio.use_neural ? '' : 'opacity-40 pointer-events-none'}`}>
-              <div className="flex justify-between text-xs text-slate-400 mb-1">
-                <span>Tempo tightness</span>
-                <span className="font-mono">{audio.neural_tightness}</span>
-              </div>
-              <input
-                type="range" min={20} max={400} step={10}
-                value={audio.neural_tightness}
-                onChange={(e) => updateAudio({
-                  neural_tightness: parseInt(e.target.value, 10) || 100,
-                })}
-                className="w-full touch-none"
-              />
-              <p className="text-xs text-slate-500 mt-1">
-                Higher = picker sticks harder to the estimated tempo
-                (good for steady electronic tracks). Lower = more
-                flexible to tempo drift (good for live/acoustic music).
-                Default 100.
-              </p>
+              <label className="flex items-center gap-3 text-sm text-slate-300 touch-manipulation">
+                <input
+                  type="checkbox"
+                  checked={audio.neural_tightness >= 200}
+                  onChange={(e) => updateAudio({
+                    neural_tightness: e.target.checked ? 250 : 100,
+                  })}
+                  className="w-5 h-5 accent-indigo-500"
+                />
+                <span>
+                  Prefer steady tempo (DBN post-processor)
+                  <span className="text-slate-500 ml-2">
+                    (extra HMM smoothing pass — turn on for
+                    steady-tempo electronic tracks; off is usually
+                    better for everything else, including live music.)
+                  </span>
+                </span>
+              </label>
             </div>
             <p className="mt-3 text-xs text-slate-500">
               With this off, audio-mode uses the raw spectral-flux
