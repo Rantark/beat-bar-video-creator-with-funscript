@@ -87,6 +87,16 @@ export type Pose = {
   confidence_threshold: number  // 0..1; per-frame detection min conf
   invert: boolean
   resize_max: number        // long-edge cap for inference (speed knob)
+  device: DeviceChoice
+}
+
+export type DeviceChoice = 'auto' | 'cpu' | 'cuda'
+
+export type DeviceState = {
+  cuda_available: boolean
+  device_count: number
+  gpu_name: string | null
+  torch_build: string | null
 }
 
 export const POSE_KEYPOINTS = [
@@ -105,7 +115,7 @@ export type Audio = {
   min_gap_ms: number    // refractory period between onsets
   low_hz: number        // spectral band low edge
   high_hz: number       // spectral band high edge
-  // Learned beat tracker (librosa) instead of raw spectral-flux
+  // SOTA neural beat tracker (BEAT This!) instead of raw spectral-flux
   // peak-picking. Handles tempo changes, syncopation, and quiet
   // passages more accurately. Requires the [neural] optional install.
   use_neural: boolean
@@ -113,6 +123,10 @@ export type Audio = {
   // sticks harder to the estimated tempo, useful when a song has a
   // steady beat under a busy surface.
   neural_tightness: number
+  // "auto" uses GPU if a working CUDA torch build is present, CPU
+  // otherwise. "cpu" and "cuda" force one; "cuda" falls back to CPU
+  // on a machine without CUDA rather than crashing the job.
+  device: DeviceChoice
   // Regularization: split the track into ~section_target_ms windows,
   // lock a steady tempo per window, emit a phase-aligned grid. Turns
   // spontaneous onset detection into a rhythm-game-style chart with

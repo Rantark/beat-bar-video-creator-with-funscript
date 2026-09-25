@@ -43,6 +43,7 @@ from scipy.signal import find_peaks, savgol_filter
 
 from app.config import settings
 from app.processing.base import VideoInfo
+from app.processing.device import resolve_device
 from app.processing.funscript import write_funscript
 
 # COCO-17 keypoint layout used by YOLOv8-pose. Kept as a dict so the
@@ -70,6 +71,9 @@ class PoseProcessor:
         confidence = float(pose.get("confidence_threshold", 0.3))
         invert = bool(pose.get("invert", False))
         resize_max = int(pose.get("resize_max", 640))  # long-edge cap for speed
+        device, device_note = resolve_device(pose.get("device"))
+        if device_note:
+            print(f"[pose] {device_note}", flush=True)
 
         try:
             from ultralytics import YOLO
@@ -115,6 +119,7 @@ class PoseProcessor:
                 # verbose=False silences ultralytics's per-frame stdout spam.
                 results = model.predict(
                     frame, verbose=False, conf=confidence, imgsz=infer_w,
+                    device=device,
                 )
                 res = results[0] if results else None
                 person_kpts = _pick_person(res, last_centroid)

@@ -5,6 +5,7 @@ import { BeatShapeControls, clampShape } from '../components/BeatShapeControls'
 import { LineDrawer } from '../components/LineDrawer'
 import { MarkerDrawer } from '../components/MarkerDrawer'
 import { BeatPatternEditor } from '../components/BeatPatternEditor'
+import { DeviceSelect } from '../components/DeviceSelect'
 import { PresetControls } from '../components/PresetControls'
 import { SpriteScrubber } from '../components/SpriteScrubber'
 import { SpriteUpload } from '../components/SpriteUpload'
@@ -77,6 +78,7 @@ export default function FramePickerPage() {
     high_hz: 8000,
     use_neural: false,
     neural_tightness: 100,
+    device: 'auto',
     regularize: true,
     section_min_ms: 10000,
     section_target_ms: 20000,
@@ -115,6 +117,7 @@ export default function FramePickerPage() {
     confidence_threshold: 0.3,
     invert: false,
     resize_max: 640,
+    device: 'auto',
   })
   function updatePose(patch: Partial<Pose>) {
     setPose((prev) => ({ ...prev, ...patch }))
@@ -492,6 +495,10 @@ export default function FramePickerPage() {
                   </span>
                 </span>
               </label>
+              <DeviceSelect
+                value={audio.device}
+                onChange={(v) => updateAudio({ device: v })}
+              />
             </div>
             <p className="mt-3 text-xs text-slate-500">
               With this off, audio-mode uses the raw spectral-flux
@@ -747,6 +754,11 @@ export default function FramePickerPage() {
               subjects, dramatically slower.
             </p>
           </div>
+
+          <DeviceSelect
+            value={pose.device}
+            onChange={(v) => updatePose({ device: v })}
+          />
 
           <label className="mt-3 flex items-center gap-3 text-sm text-slate-300 touch-manipulation">
             <input

@@ -96,6 +96,10 @@ class AudioProcessor:
         pattern_variety = max(0.0, min(1.0, float(audio.get("pattern_variety", 0.0))))
         use_neural = bool(audio.get("use_neural", False))
         neural_tightness = max(10.0, min(500.0, float(audio.get("neural_tightness", 100.0))))
+        from app.processing.device import resolve_device
+        neural_device, device_note = resolve_device(audio.get("device"))
+        if device_note:
+            print(f"[audio] {device_note}", flush=True)
 
         # User-defined beat patterns. Two accepted shapes:
         #   * Legacy: [[true, false, true], ...] — a list of boolean
@@ -141,6 +145,7 @@ class AudioProcessor:
                 onset_ms, downbeat_ms, novelty, hop_ms = (
                     audio_beats_neural.detect_beats_neural(
                         pcm, 22050, use_dbn=neural_tightness >= 200,
+                        device=neural_device,
                     )
                 )
             except ImportError:

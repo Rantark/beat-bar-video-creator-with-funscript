@@ -242,6 +242,34 @@ funscript-gen/
 └── docs/
 ```
 
+## GPU acceleration (optional)
+
+Audio-mode BEAT This! and pose-mode YOLOv8-pose both run on CPU by
+default. If you have an NVIDIA GPU you can flip them to GPU per job
+via the **Compute device** selector in the Audio / Pose panels
+(Auto / CPU / GPU). Auto picks GPU when a working CUDA build of
+PyTorch is installed, otherwise falls back to CPU. Selecting GPU on
+a machine without CUDA silently falls back to CPU (with a warning in
+the backend log) rather than crashing the job.
+
+The default install ships the CPU-only PyTorch build. To enable GPU
+inference, reinstall PyTorch with CUDA support in the backend venv:
+
+```powershell
+# From backend/ — pick the CUDA build matching your driver.
+# cu124 covers most drivers from mid-2024 on; cu121 works with older ones.
+.\.venv\Scripts\python.exe -m pip install --force-reinstall `
+    torch torchvision `
+    --index-url https://download.pytorch.org/whl/cu124
+```
+
+This swaps ~250 MB of CPU torch for ~2.5 GB of CUDA torch. YOLOv8-pose
+needs ~500-800 MB VRAM at `imgsz=640`; BEAT This! ~500-700 MB. Both
+share the GPU with any running application (games included), so
+gaming while a job runs is possible but expect a 10-30% game
+framerate drop while the job is active. Flip to CPU if you're
+actively gaming and don't want that.
+
 ## Security — read before deploying
 
 This app is **not designed to be exposed to the public internet**.

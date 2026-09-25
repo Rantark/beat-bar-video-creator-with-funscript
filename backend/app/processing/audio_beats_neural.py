@@ -24,20 +24,19 @@ from __future__ import annotations
 import numpy as np
 
 # Model instantiation is heavy (~1-2s cold start) and completely stateless
-# once loaded. Cache both the frame extractor and the postprocessor so a
-# batch of jobs in the same process pays the load cost once.
-_FRAMES = None
+# once loaded. Cache per-device so switching between CPU and GPU jobs
+# doesn't re-instantiate every time.
+_FRAMES: dict = {}
 _POSTPROC: dict = {}
 _FRAME_HZ = 50  # BEAT This emits 50 activation frames per second
 
 
-def _get_frames_model():
-    global _FRAMES
-    if _FRAMES is not None:
-        return _FRAMES
+def _get_frames_model(device: str = "cpu"):
+    if device in _FRAMES:
+        return _FRAMES[device]
     from beat_this.inference import Audio2Frames
-    _FRAMES = Audio2Frames(checkpoint_path="final0", device="cpu")
-    return _FRAMES
+    _FRAMES[device] = Audio2Frames(checkpoint_path="final0", device=device)
+    return _FRAMES[device]
 
 
 def _get_postproc(dbn: bool):
@@ -54,6 +53,7 @@ def detect_beats_neural(
     sample_rate: int,
     *,
     use_dbn: bool = False,
+    device: str = "cpu",
 ) -> tuple[list[int], list[int], np.ndarray, float]:
     """Run BEAT This! over the whole clip.
 
@@ -70,7 +70,7 @@ def detect_beats_neural(
     if pcm.size == 0:
         return [], [], np.zeros(0, dtype=np.float32), 1000.0 / _FRAME_HZ
 
-    frames_model = _get_frames_model()
+    frames_model = _get_frames_model(device=device)
     postproc = _get_postproc(dbn=use_dbn)
 
     # Audio2Frames handles resampling internally and returns two 1-D

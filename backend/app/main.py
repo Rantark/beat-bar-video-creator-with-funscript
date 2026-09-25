@@ -41,6 +41,15 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/api/system/device")
+def device_state():
+    """Snapshot of the current neural device situation. The UI reads
+    this once when the frame picker mounts so it can gray out the GPU
+    option and show a hint when CUDA isn't actually available."""
+    from app.processing.device import describe_device_state
+    return describe_device_state()
+
+
 app.include_router(uploads.router)
 app.include_router(videos.router)
 app.include_router(jobs.router)

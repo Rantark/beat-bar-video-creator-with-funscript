@@ -1,4 +1,4 @@
-import type { Action, Funscript, Job, JobMeta, Preset, UploadInit, VideoMeta } from './types'
+import type { Action, DeviceState, Funscript, Job, JobMeta, Preset, UploadInit, VideoMeta } from './types'
 
 // All routes go through /api so Vite's dev proxy and the eventual
 // prod static-serving path both work with the same client code.
@@ -11,6 +11,9 @@ async function j<T>(res: Response, label: string): Promise<T> {
 
 export const api = {
   health: () => fetch(`${BASE}/health`).then(r => j<{ status: string }>(r, 'health')),
+
+  deviceState: () =>
+    fetch(`${BASE}/system/device`).then(r => j<DeviceState>(r, 'deviceState')),
 
   listVideos: () => fetch(`${BASE}/videos`).then(r => j<VideoMeta[]>(r, 'listVideos')),
 
