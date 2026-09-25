@@ -84,7 +84,22 @@ class PoseProcessor:
             ) from exc
 
         # Model auto-downloads to torch's hub cache on first use (~6.5 MB).
+        # Move the model to the target device ONCE, not per-predict —
+        # per-call device kwarg triggers repeated H2D/D2H bookkeeping
+        # that's most of the reason a 4070 Ti was only 1.3x faster than
+        # CPU. Pinning it makes the actual GPU speedup show up.
         model = YOLO("yolov8n-pose.pt")
+        model.to(device)
+        # fp16 halves memory bandwidth and typically doubles throughput
+        # on Ampere/Ada GPUs. YOLOv8n's accuracy hit at fp16 is
+        # negligible. CPU can't do fp16 usefully, so keep it off there.
+        use_half = device.startswith("cuda")
+        # Batching amortizes CUDA launch overhead across many frames.
+        # 32 is a sweet spot for YOLOv8n at 640 on modern GPUs; small
+        # models are compute-light so throughput scales with batch size
+        # until we're bandwidth-bound. Kept at 1 on CPU because larger
+        # batches don't help there and cost memory.
+        batch = 32 if device.startswith("cuda") else 1
 
         cap = cv2.VideoCapture(str(video.path))
         if not cap.isOpened():
@@ -101,11 +116,35 @@ class PoseProcessor:
         infer_w = int(w0 * scale)
         infer_h = int(h0 * scale)
 
-        xy_series: list[tuple[float, float] | None] = []
+        xy_series: list[np.ndarray | None] = []
         # Last chosen person centroid — helps re-lock to the same person
         # after brief occlusions. Simple heuristic: nearest centroid wins.
         last_centroid: tuple[float, float] | None = None
 
+        def flush(batch_frames: list) -> None:
+            nonlocal last_centroid
+            if not batch_frames:
+                return
+            # `quantize='fp16'` replaces the deprecated `half=True`
+            # kwarg on newer ultralytics. Only meaningful on CUDA;
+            # CPU fp16 is slower than fp32 in practice.
+            kwargs = {"quantize": "fp16"} if use_half else {}
+            results = model.predict(
+                batch_frames, verbose=False, conf=confidence,
+                imgsz=infer_w, **kwargs,
+            )
+            for res in results:
+                person_kpts = _pick_person(res, last_centroid)
+                if person_kpts is None:
+                    xy_series.append(None)
+                else:
+                    xy_series.append(person_kpts)
+                    torso = person_kpts[[5, 6, 11, 12], :]
+                    cx = float(np.mean(torso[:, 0]))
+                    cy = float(np.mean(torso[:, 1]))
+                    last_centroid = (cx, cy)
+
+        frame_buffer: list = []
         frame_idx = 0
         last_progress = 0
         try:
@@ -115,31 +154,16 @@ class PoseProcessor:
                     break
                 if scale < 1.0:
                     frame = cv2.resize(frame, (infer_w, infer_h), interpolation=cv2.INTER_AREA)
-
-                # verbose=False silences ultralytics's per-frame stdout spam.
-                results = model.predict(
-                    frame, verbose=False, conf=confidence, imgsz=infer_w,
-                    device=device,
-                )
-                res = results[0] if results else None
-                person_kpts = _pick_person(res, last_centroid)
-                if person_kpts is None:
-                    xy_series.append(None)
-                else:
-                    # keypoints_xy: (17, 2) — pixel coords in the resized frame.
-                    xy_series.append(person_kpts)
-                    # Update the centroid from the mean of visible torso points
-                    # (shoulders + hips) so tracking is stable across occlusions
-                    # that lose face keypoints.
-                    torso = person_kpts[5:7 + 6:1]  # 5,6 shoulders; 11,12 hips
-                    cx = float(np.mean(torso[:, 0]))
-                    cy = float(np.mean(torso[:, 1]))
-                    last_centroid = (cx, cy)
-
+                frame_buffer.append(frame)
                 frame_idx += 1
-                if frame_idx - last_progress >= 30:
-                    progress_cb(min(0.9, 0.9 * frame_idx / total_frames))
-                    last_progress = frame_idx
+                if len(frame_buffer) >= batch:
+                    flush(frame_buffer)
+                    frame_buffer = []
+                    if frame_idx - last_progress >= 30:
+                        progress_cb(min(0.9, 0.9 * frame_idx / total_frames))
+                        last_progress = frame_idx
+            # Drain the tail batch that didn't fill.
+            flush(frame_buffer)
         finally:
             cap.release()
 
