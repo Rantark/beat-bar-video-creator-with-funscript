@@ -31,7 +31,7 @@ export const api = {
 
   createJob: (payload: {
     video_id: string
-    mode: 'zone' | 'line' | 'marker' | 'audio'
+    mode: 'zone' | 'line' | 'marker' | 'audio' | 'pose'
     params: Record<string, unknown>
   }) =>
     fetch(`${BASE}/jobs`, {

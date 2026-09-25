@@ -26,6 +26,10 @@ desktop = ["pywebview>=5.3"]
 # neural beat tracker in Audio mode (CPJKU BEAT This! 2024). Adds
 # PyTorch + torchaudio (~250 MB) plus a 30 MB model on first use.
 neural = ["beat_this>=1.1"]
+# Optional: install with `pip install -e .[pose]` to enable Pose
+# detection mode (YOLOv8-pose body-keypoint tracker). Reuses the
+# PyTorch install; the 6.5 MB model auto-downloads on first use.
+pose = ["ultralytics>=8.2"]
 
 [build-system]
 requires = ["setuptools>=68"]

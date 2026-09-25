@@ -75,6 +75,28 @@ export type Marker = {
 // so distant background motion can't steal tracking.
 export const LINE_STRIP_FRACTION = 0.2
 
+// Pose-driven detection. No spatial placement — the neural body-
+// keypoint tracker (YOLOv8-pose) finds the person automatically.
+// Requires the [pose] optional backend install.
+export type Pose = {
+  // Which of the 17 COCO keypoints drives the funscript. "auto" picks
+  // the keypoint whose vertical position moves the most across the
+  // clip — usually the right answer for whole-body rhythmic content.
+  keypoint: string          // "auto" or a keypoint name
+  axis: 'y' | 'x' | 'magnitude'
+  confidence_threshold: number  // 0..1; per-frame detection min conf
+  invert: boolean
+  resize_max: number        // long-edge cap for inference (speed knob)
+}
+
+export const POSE_KEYPOINTS = [
+  'auto',
+  'nose', 'left_eye', 'right_eye', 'left_ear', 'right_ear',
+  'left_shoulder', 'right_shoulder', 'left_elbow', 'right_elbow',
+  'left_wrist', 'right_wrist', 'left_hip', 'right_hip',
+  'left_knee', 'right_knee', 'left_ankle', 'right_ankle',
+] as const
+
 // Audio-driven mode. No spatial placement — the whole thing runs off
 // the source's audio track. Rhythm knobs are shared with marker/line
 // via the same beat_actions pipeline on the backend.
@@ -148,7 +170,7 @@ export type BeatPattern = {
 export type Job = {
   id: string
   video_id: string
-  mode: 'zone' | 'line' | 'marker' | 'audio' | 'imported'
+  mode: 'zone' | 'line' | 'marker' | 'audio' | 'pose' | 'imported'
   params: Record<string, unknown>
   status: 'queued' | 'processing' | 'done' | 'failed'
   progress: number

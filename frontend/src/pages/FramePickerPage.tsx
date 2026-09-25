@@ -9,7 +9,8 @@ import { PresetControls } from '../components/PresetControls'
 import { SpriteScrubber } from '../components/SpriteScrubber'
 import { SpriteUpload } from '../components/SpriteUpload'
 import { ZoneDrawer } from '../components/ZoneDrawer'
-import type { Audio, Line, Marker, VideoMeta, Zone } from '../types'
+import type { Audio, Line, Marker, Pose, VideoMeta, Zone } from '../types'
+import { POSE_KEYPOINTS } from '../types'
 
 // Fields that get saved into a preset — only the *tuning* knobs, never
 // spatial placement (marker x/y/radius, line x/y/length/orientation) so a
@@ -31,7 +32,7 @@ function pickKeys<T extends Record<string, unknown>>(
   return out
 }
 
-type Mode = 'zone' | 'line' | 'marker' | 'audio'
+type Mode = 'zone' | 'line' | 'marker' | 'audio' | 'pose'
 
 export default function FramePickerPage() {
   const { videoId } = useParams()
@@ -108,6 +109,16 @@ export default function FramePickerPage() {
   function updateLine(patch: Partial<Line>) {
     setLine((prev) => clampShape({ ...prev, ...patch }))
   }
+  const [pose, setPose] = useState<Pose>({
+    keypoint: 'auto',
+    axis: 'y',
+    confidence_threshold: 0.3,
+    invert: false,
+    resize_max: 640,
+  })
+  function updatePose(patch: Partial<Pose>) {
+    setPose((prev) => ({ ...prev, ...patch }))
+  }
   // Default off in general, but auto-on in audio mode where the
   // scrolling beat bar overlay is the whole point of the mode. Users
   // can still opt out to skip the render.
@@ -158,6 +169,7 @@ export default function FramePickerPage() {
         mode === 'zone' ? { zone, invert } :
         mode === 'line' ? { line } :
         mode === 'marker' ? { marker } :
+        mode === 'pose' ? { pose } :
         { audio }
       const params = { ...shape, debug }
       await api.createJob({ video_id: video.id, mode, params })
@@ -256,6 +268,9 @@ export default function FramePickerPage() {
         </ModeButton>
         <ModeButton active={mode === 'audio'} onClick={() => setMode('audio')}>
           Audio
+        </ModeButton>
+        <ModeButton active={mode === 'pose'} onClick={() => setMode('pose')}>
+          Pose
         </ModeButton>
       </div>
 
@@ -643,6 +658,110 @@ export default function FramePickerPage() {
             onChange={(patch) => updateAudio(patch as Partial<Audio>)}
             showSensitivity={false}
           />
+        </div>
+      )}
+
+      {mode === 'pose' && (
+        <div className="mt-3">
+          <p className="text-sm text-slate-400">
+            YOLOv8-pose finds the person in each frame and tracks 17
+            body keypoints. Pick which keypoint's motion drives the
+            funscript — "auto" scans the whole clip and picks the one
+            that moved the most on the chosen axis. No spatial
+            placement needed; the neural detector handles that itself.
+          </p>
+          <p className="mt-2 text-xs text-amber-300 bg-amber-950/30 border border-amber-800/40 rounded p-2">
+            Requires the <span className="font-mono">[pose]</span>
+            {' '}backend install. In the backend venv:{' '}
+            <span className="font-mono">pip install ultralytics</span>.
+            The 6.5&nbsp;MB model auto-downloads on the first pose
+            job.
+          </p>
+
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <label className="text-xs text-slate-400">
+              <span className="block mb-1">Keypoint</span>
+              <select
+                value={pose.keypoint}
+                onChange={(e) => updatePose({ keypoint: e.target.value })}
+                className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-2 text-sm"
+              >
+                {POSE_KEYPOINTS.map((k) => (
+                  <option key={k} value={k}>{k}</option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs text-slate-400">
+              <span className="block mb-1">Axis</span>
+              <select
+                value={pose.axis}
+                onChange={(e) => updatePose({ axis: e.target.value as 'x' | 'y' | 'magnitude' })}
+                className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-2 text-sm"
+              >
+                <option value="y">Y (vertical) — default</option>
+                <option value="x">X (horizontal)</option>
+                <option value="magnitude">Magnitude</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="mt-3">
+            <div className="flex justify-between text-xs text-slate-400 mb-1">
+              <span>Detection confidence threshold</span>
+              <span className="font-mono">
+                {Math.round(pose.confidence_threshold * 100)}%
+              </span>
+            </div>
+            <input
+              type="range" min={0} max={1000}
+              value={Math.round(pose.confidence_threshold * 1000)}
+              onChange={(e) => updatePose({
+                confidence_threshold: parseInt(e.target.value, 10) / 1000,
+              })}
+              className="w-full touch-none"
+            />
+            <p className="text-xs text-slate-500 mt-1">
+              Frames where no detection clears this bar are treated as
+              occluded and interpolated. Lower = catches partial
+              detections but risks tracking noise; higher = only
+              confident detections, may leave gaps.
+            </p>
+          </div>
+
+          <div className="mt-3">
+            <div className="flex justify-between text-xs text-slate-400 mb-1">
+              <span>Inference resolution</span>
+              <span className="font-mono">{pose.resize_max}px</span>
+            </div>
+            <input
+              type="range" min={320} max={1280} step={32}
+              value={pose.resize_max}
+              onChange={(e) => updatePose({
+                resize_max: parseInt(e.target.value, 10) || 640,
+              })}
+              className="w-full touch-none"
+            />
+            <p className="text-xs text-slate-500 mt-1">
+              Long-edge cap for the pose model input. 640 is the sweet
+              spot on CPU. Higher = more accurate on small-in-frame
+              subjects, dramatically slower.
+            </p>
+          </div>
+
+          <label className="mt-3 flex items-center gap-3 text-sm text-slate-300 touch-manipulation">
+            <input
+              type="checkbox"
+              checked={pose.invert}
+              onChange={(e) => updatePose({ invert: e.target.checked })}
+              className="w-5 h-5 accent-indigo-500"
+            />
+            <span>
+              Invert direction
+              <span className="text-slate-500 ml-2">
+                (flip if the output feels backwards)
+              </span>
+            </span>
+          </label>
         </div>
       )}
 

@@ -30,6 +30,12 @@ yt-dlp>=2024.10
 # detection if beat_this isn't installed, so this is genuinely optional.
 beat_this>=1.1
 
+# Optional: YOLOv8-pose body-keypoint tracker for Pose detection mode.
+# Reuses the PyTorch install that beat_this already pulls in. The
+# yolov8n-pose.pt weights (~6.5 MB) auto-download on first job to
+# torch's hub cache. Pose mode is only available with this installed.
+ultralytics>=8.2
+
 # Desktop-app launcher (start-desktop.bat / backend/desktop.py). Only
 # needed if you want a native window instead of the browser tab.
 # Windows uses WebView2 (bundled with Windows 10 21H1+ / Windows 11).

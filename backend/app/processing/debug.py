@@ -63,6 +63,63 @@ def render_zone_debug(
     _render(source_video, out_path, draw_fn=draw, event_frames=events, label="REVERSAL")
 
 
+def render_pose_debug(
+    source_video: Path,
+    out_path: Path,
+    xy_series: "list",
+    keypoint_index: int,
+    axis: str,
+    scale: float,
+    reversal_frame_indices: Iterable[int],
+) -> None:
+    """Draw the pose skeleton on every frame plus a highlighted marker
+    on the chosen keypoint. Coordinates in xy_series are in the
+    resized inference frame — we rescale back to source pixels before
+    drawing so the overlay lines up with what the user sees.
+
+    COCO-17 skeleton edges (indices into the keypoint list):
+      face   : (0,1) (0,2) (1,3) (2,4)
+      arms   : (5,7) (7,9) (6,8) (8,10)
+      torso  : (5,6) (5,11) (6,12) (11,12)
+      legs   : (11,13) (13,15) (12,14) (14,16)
+    """
+    events = set(int(i) for i in reversal_frame_indices)
+    inv_scale = 1.0 / scale if scale > 0 else 1.0
+    skeleton = [
+        (0, 1), (0, 2), (1, 3), (2, 4),
+        (5, 7), (7, 9), (6, 8), (8, 10),
+        (5, 6), (5, 11), (6, 12), (11, 12),
+        (11, 13), (13, 15), (12, 14), (14, 16),
+    ]
+
+    def draw(frame: np.ndarray, frame_idx: int, flash_left: int) -> int:
+        if 0 <= frame_idx < len(xy_series):
+            kpts = xy_series[frame_idx]
+            if kpts is not None:
+                pts = (kpts * inv_scale).astype(int)
+                for a, b in skeleton:
+                    pa, pb = pts[a], pts[b]
+                    if (pa != 0).any() and (pb != 0).any():
+                        cv2.line(frame, tuple(pa), tuple(pb), (0, 200, 200), 2)
+                for i, p in enumerate(pts):
+                    if (p != 0).any():
+                        cv2.circle(frame, tuple(p), 3, (255, 255, 255), -1)
+                # Chosen keypoint gets a big magenta ring so the user
+                # can see exactly which anatomy the signal is coming from.
+                chosen = pts[keypoint_index]
+                if (chosen != 0).any():
+                    cv2.circle(frame, tuple(chosen), 12, (255, 40, 200), 3)
+                    label = f"kp {keypoint_index} · axis {axis}"
+                    cv2.putText(frame, label, (12, 32),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                                (255, 40, 200), 2, cv2.LINE_AA)
+        if frame_idx in events:
+            flash_left = 0
+        return flash_left
+
+    _render(source_video, out_path, draw_fn=draw, event_frames=events, label="REVERSAL")
+
+
 def render_audio_debug(
     source_video: Path,
     out_path: Path,
