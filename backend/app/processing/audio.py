@@ -184,6 +184,9 @@ class AudioProcessor:
                 section_fluctuation=section_fluctuation,
                 pattern_variety=pattern_variety,
                 patterns=patterns,
+                # BEAT This! populates this; spectral flux leaves it empty.
+                # Empty list falls back to onset-anchored pattern phase.
+                downbeats_ms=downbeat_ms,
             )
 
         actions = beat_actions.beats_to_actions(

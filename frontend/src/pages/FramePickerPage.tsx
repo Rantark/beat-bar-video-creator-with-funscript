@@ -7,10 +7,11 @@ import { MarkerDrawer } from '../components/MarkerDrawer'
 import { BeatPatternEditor } from '../components/BeatPatternEditor'
 import { DeviceSelect } from '../components/DeviceSelect'
 import { PresetControls } from '../components/PresetControls'
+import { SamClickDrawer } from '../components/SamClickDrawer'
 import { SpriteScrubber } from '../components/SpriteScrubber'
 import { SpriteUpload } from '../components/SpriteUpload'
 import { ZoneDrawer } from '../components/ZoneDrawer'
-import type { Audio, Line, Marker, Pose, VideoMeta, Zone } from '../types'
+import type { Audio, Line, Marker, Pose, SamObject, VideoMeta, Zone } from '../types'
 import { POSE_KEYPOINTS } from '../types'
 
 // Fields that get saved into a preset — only the *tuning* knobs, never
@@ -33,7 +34,7 @@ function pickKeys<T extends Record<string, unknown>>(
   return out
 }
 
-type Mode = 'zone' | 'line' | 'marker' | 'audio' | 'pose'
+type Mode = 'zone' | 'line' | 'marker' | 'audio' | 'pose' | 'object'
 
 export default function FramePickerPage() {
   const { videoId } = useParams()
@@ -124,6 +125,21 @@ export default function FramePickerPage() {
   function updatePose(patch: Partial<Pose>) {
     setPose((prev) => ({ ...prev, ...patch }))
   }
+  const [samObject, setSamObject] = useState<SamObject>({
+    click_time_ms: 0,
+    click_x: 0.5,
+    click_y: 0.5,
+    axis: 'y',
+    invert: false,
+    model_size: 'tiny',
+    device: 'auto',
+    detect_scene_cuts: true,
+    scene_cut_threshold: 0.35,
+  })
+  function updateSamObject(patch: Partial<SamObject>) {
+    setSamObject((prev) => ({ ...prev, ...patch }))
+  }
+  const [samClickSet, setSamClickSet] = useState(false)
   // Default off in general, but auto-on in audio mode where the
   // scrolling beat bar overlay is the whole point of the mode. Users
   // can still opt out to skip the render.
@@ -167,6 +183,10 @@ export default function FramePickerPage() {
       setError('Draw a zone on the video first (touch and drag).')
       return
     }
+    if (mode === 'object' && !samClickSet) {
+      setError('Click the thing you want tracked on the video frame first.')
+      return
+    }
     setSubmitting(true)
     setError(null)
     try {
@@ -175,6 +195,7 @@ export default function FramePickerPage() {
         mode === 'line' ? { line } :
         mode === 'marker' ? { marker } :
         mode === 'pose' ? { pose } :
+        mode === 'object' ? { sam: samObject } :
         { audio }
       const params = { ...shape, debug }
       await api.createJob({ video_id: video.id, mode, params })
@@ -257,6 +278,16 @@ export default function FramePickerPage() {
             videoDims={{ width: video.width, height: video.height }}
           />
         )}
+        {mode === 'object' && (
+          <SamClickDrawer
+            click={samClickSet ? { x: samObject.click_x, y: samObject.click_y } : null}
+            onChange={(c, t) => {
+              updateSamObject({ click_x: c.x, click_y: c.y, click_time_ms: t })
+              setSamClickSet(true)
+            }}
+            videoRef={videoRef}
+          />
+        )}
       </div>
 
       <SpriteScrubber video={video} onSeek={seek} />
@@ -276,6 +307,9 @@ export default function FramePickerPage() {
         </ModeButton>
         <ModeButton active={mode === 'pose'} onClick={() => setMode('pose')}>
           Pose
+        </ModeButton>
+        <ModeButton active={mode === 'object'} onClick={() => setMode('object')}>
+          Object
         </ModeButton>
       </div>
 
@@ -814,6 +848,129 @@ export default function FramePickerPage() {
               type="checkbox"
               checked={pose.invert}
               onChange={(e) => updatePose({ invert: e.target.checked })}
+              className="w-5 h-5 accent-indigo-500"
+            />
+            <span>
+              Invert direction
+              <span className="text-slate-500 ml-2">
+                (flip if the output feels backwards)
+              </span>
+            </span>
+          </label>
+        </div>
+      )}
+
+      {mode === 'object' && (
+        <div className="mt-3">
+          <p className="text-sm text-slate-400">
+            SAM 2 (Segment Anything 2) tracks any object you click, no
+            template or training required. Scrub to a frame where the
+            thing is clearly visible, then click it — the neural mask
+            propagates forwards and backwards through the whole clip.
+            Handles color changes, rotation, scale, and partial
+            occlusion way better than classical template matching.
+          </p>
+          <p className="mt-2 text-xs text-amber-300 bg-amber-950/30 border border-amber-800/40 rounded p-2">
+            Requires the <span className="font-mono">[object]</span>
+            {' '}backend install. In the backend venv:{' '}
+            <span className="font-mono">pip install sam2</span>. The
+            ~150&nbsp;MB tiny model auto-downloads on the first job.
+          </p>
+
+          {!samClickSet && (
+            <p className="mt-3 text-sm text-fuchsia-300 bg-fuchsia-950/30 border border-fuchsia-800/40 rounded p-2">
+              👆 Click the thing you want tracked on the video above.
+            </p>
+          )}
+          {samClickSet && (
+            <p className="mt-3 text-xs text-slate-500">
+              Click point set at ({(samObject.click_x * 100).toFixed(0)}%,{' '}
+              {(samObject.click_y * 100).toFixed(0)}%) on the frame at{' '}
+              {(samObject.click_time_ms / 1000).toFixed(2)}s. Click a
+              different point (or scrub + click) to change.
+            </p>
+          )}
+
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <label className="text-xs text-slate-400">
+              <span className="block mb-1">Model size</span>
+              <select
+                value={samObject.model_size}
+                onChange={(e) => updateSamObject({
+                  model_size: e.target.value as 'tiny' | 'small' | 'base+' | 'large',
+                })}
+                className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-2 text-sm"
+              >
+                <option value="tiny">Tiny (~150 MB — fastest)</option>
+                <option value="small">Small (~185 MB)</option>
+                <option value="base+">Base+ (~325 MB)</option>
+                <option value="large">Large (~900 MB — most accurate)</option>
+              </select>
+            </label>
+            <label className="text-xs text-slate-400">
+              <span className="block mb-1">Axis</span>
+              <select
+                value={samObject.axis}
+                onChange={(e) => updateSamObject({
+                  axis: e.target.value as 'x' | 'y' | 'magnitude',
+                })}
+                className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-2 text-sm"
+              >
+                <option value="y">Y (vertical) — default</option>
+                <option value="x">X (horizontal)</option>
+                <option value="magnitude">Magnitude</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="mt-4 pt-3 border-t border-slate-800">
+            <p className="text-xs uppercase tracking-wide text-slate-500 mb-2">
+              Scene / angle changes
+            </p>
+            <label className="flex items-center gap-3 text-sm text-slate-300 touch-manipulation">
+              <input
+                type="checkbox"
+                checked={samObject.detect_scene_cuts}
+                onChange={(e) => updateSamObject({ detect_scene_cuts: e.target.checked })}
+                className="w-5 h-5 accent-indigo-500"
+              />
+              <span>
+                Detect scene cuts and normalize per scene
+                <span className="text-slate-500 ml-2">
+                  (SAM 2 can drift onto a similar-looking object across
+                  hard cuts — per-scene normalization at least keeps
+                  each scene's motion range coherent.)
+                </span>
+              </span>
+            </label>
+            <div className={`mt-3 ${samObject.detect_scene_cuts ? '' : 'opacity-40 pointer-events-none'}`}>
+              <div className="flex justify-between text-xs text-slate-400 mb-1">
+                <span>Cut sensitivity</span>
+                <span className="font-mono">
+                  {Math.round(samObject.scene_cut_threshold * 100)}%
+                </span>
+              </div>
+              <input
+                type="range" min={50} max={800} step={10}
+                value={Math.round(samObject.scene_cut_threshold * 1000)}
+                onChange={(e) => updateSamObject({
+                  scene_cut_threshold: parseInt(e.target.value, 10) / 1000,
+                })}
+                className="w-full touch-none"
+              />
+            </div>
+          </div>
+
+          <DeviceSelect
+            value={samObject.device}
+            onChange={(v) => updateSamObject({ device: v })}
+          />
+
+          <label className="mt-3 flex items-center gap-3 text-sm text-slate-300 touch-manipulation">
+            <input
+              type="checkbox"
+              checked={samObject.invert}
+              onChange={(e) => updateSamObject({ invert: e.target.checked })}
               className="w-5 h-5 accent-indigo-500"
             />
             <span>

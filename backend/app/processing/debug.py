@@ -401,6 +401,46 @@ def _paste_bgra_prescaled(
 _cached_total_frames = [0]
 
 
+def render_sam_debug(
+    source_video: Path,
+    out_path: Path,
+    centroids: "list",
+    scene_cut_frames: Iterable[int] = (),
+) -> None:
+    """Draw a magenta dot at the tracked object's centroid on every
+    frame plus a scene-cut banner along the top. Simpler than the
+    pose overlay because SAM 2 already gave us just the position we
+    care about, no skeleton to reconstruct."""
+    cut_set = set(int(i) for i in scene_cut_frames if int(i) > 0)
+    cut_flash_state = {"frames_left": 0}
+
+    def draw(frame: np.ndarray, frame_idx: int, flash_left: int) -> int:
+        if frame_idx in cut_set:
+            cut_flash_state["frames_left"] = 15
+        if 0 <= frame_idx < len(centroids):
+            c = centroids[frame_idx]
+            if c is not None:
+                cx, cy = int(c[0]), int(c[1])
+                cv2.circle(frame, (cx, cy), 14, (255, 40, 200), 3)
+                cv2.circle(frame, (cx, cy), 3, (255, 255, 255), -1)
+                cv2.putText(frame, "OBJECT", (12, 32),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                            (255, 40, 200), 2, cv2.LINE_AA)
+        if cut_flash_state["frames_left"] > 0:
+            alpha = cut_flash_state["frames_left"] / 15.0
+            h, w = frame.shape[:2]
+            overlay = frame.copy()
+            cv2.rectangle(overlay, (0, 0), (w, 12), (255, 220, 0), -1)
+            cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, dst=frame)
+            cv2.putText(frame, "SCENE CUT", (w - 200, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                        (255, 220, 0), 2, cv2.LINE_AA)
+            cut_flash_state["frames_left"] -= 1
+        return flash_left
+
+    _render(source_video, out_path, draw_fn=draw, event_frames=set(), label="OBJECT")
+
+
 def render_line_debug(
     source_video: Path,
     out_path: Path,

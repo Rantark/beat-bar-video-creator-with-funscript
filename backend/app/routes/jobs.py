@@ -16,6 +16,7 @@ from app.processing.funscript import write_funscript
 from app.processing.line import LineProcessor
 from app.processing.marker import MarkerProcessor
 from app.processing.pose import PoseProcessor
+from app.processing.sam import SamProcessor
 from app.processing.zone import ZoneProcessor
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
@@ -30,8 +31,8 @@ def create_job(payload: dict, background_tasks: BackgroundTasks):
     video_id = payload.get("video_id")
     mode = payload.get("mode")
     params = payload.get("params") or {}
-    if mode not in ("zone", "line", "marker", "audio", "pose"):
-        raise HTTPException(400, "mode must be 'zone', 'line', 'marker', 'audio', or 'pose'")
+    if mode not in ("zone", "line", "marker", "audio", "pose", "object"):
+        raise HTTPException(400, "mode must be 'zone', 'line', 'marker', 'audio', 'pose', or 'object'")
     if not video_id:
         raise HTTPException(400, "video_id required")
 
@@ -441,6 +442,8 @@ def _pick_processor(mode: str):
         return AudioProcessor()
     if mode == "pose":
         return PoseProcessor()
+    if mode == "object":
+        return SamProcessor()
     raise ValueError(f"unknown mode: {mode}")
 
 

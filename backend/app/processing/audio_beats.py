@@ -207,6 +207,7 @@ def regularize_beats(
     section_fluctuation: float = 0.0,
     pattern_variety: float = 0.0,
     patterns: list[list[dict]] | None = None,
+    downbeats_ms: list[int] | None = None,
     min_onsets_per_section: int = 4,
 ) -> tuple[list[int], list[dict], list[tuple[float, float]] | None]:
     """Quantize raw onsets to a per-section steady tempo.
@@ -324,6 +325,8 @@ def regularize_beats(
             first_grid -= period_ms
 
         pattern_idx: int | None = None
+        pattern_anchor_ms = first_grid
+        aligned_to_downbeat = False
         if usable_patterns:
             # Pick a pattern per section, weighting toward patterns
             # whose density matches the section's speed.
@@ -331,8 +334,38 @@ def regularize_beats(
                 usable_patterns, period_ms, pattern_rng,
             )
             pattern = usable_patterns[pattern_idx]
-            slot = 0
-            t = first_grid
+
+            # If BEAT This! flagged downbeats, phase-lock pattern slot 0
+            # onto the first downbeat inside this section instead of the
+            # first onset — makes patterns start on beat 1 of a measure
+            # rather than a random beat in the middle. Falls back to
+            # onset-anchoring when no downbeats fall in the section (or
+            # when the tracker didn't produce any at all, e.g. spectral
+            # flux path).
+            section_downbeats = [
+                d for d in (downbeats_ms or []) if s_start <= d < s_end
+            ]
+            if section_downbeats:
+                pattern_anchor_ms = section_downbeats[0]
+                # Backfill the grid before the anchor so pre-downbeat
+                # beats still exist (slot indices wrap through the
+                # pattern length so slot 0 lands on the downbeat).
+                pattern_grid_start = pattern_anchor_ms
+                pattern_len = len(pattern)
+                while pattern_grid_start - period_ms >= s_start:
+                    pattern_grid_start -= period_ms
+                # Slot for the first emitted grid point: negative pre-anchor
+                # positions wrap into the pattern from the end so downbeat
+                # keeps slot 0.
+                pre_beats = (pattern_anchor_ms - pattern_grid_start) // period_ms
+                start_slot = (-pre_beats) % pattern_len
+                aligned_to_downbeat = True
+            else:
+                pattern_grid_start = first_grid
+                start_slot = 0
+
+            slot = start_slot
+            t = pattern_grid_start
             while t < s_end:
                 slot_def = pattern[slot % len(pattern)]
                 if slot_def.get("on"):
@@ -354,8 +387,9 @@ def regularize_beats(
             "start_ms": int(s_start),
             "end_ms": int(s_end),
             "period_ms": int(period_ms),
-            "anchor_ms": int(first_grid),
+            "anchor_ms": int(pattern_anchor_ms),
             "pattern_index": pattern_idx,
+            "downbeat_aligned": aligned_to_downbeat,
         })
 
     # Sort beats + depth overrides together so dedup stays parallel.

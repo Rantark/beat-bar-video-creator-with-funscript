@@ -105,6 +105,22 @@ export type DeviceState = {
   torch_build: string | null
 }
 
+// Object-tracking (SAM 2). User picks a frame + click point on the
+// thing they want tracked; the neural mask propagates through the
+// whole video. Reuses the same per-scene normalization pipeline pose
+// uses so angle changes don't break the signal.
+export type SamObject = {
+  click_time_ms: number   // playback time (ms) of the frame the user clicked
+  click_x: number         // normalized 0..1 X of the click point
+  click_y: number         // normalized 0..1 Y of the click point
+  axis: 'y' | 'x' | 'magnitude'
+  invert: boolean
+  model_size: 'tiny' | 'small' | 'base+' | 'large'
+  device: DeviceChoice
+  detect_scene_cuts: boolean
+  scene_cut_threshold: number
+}
+
 export const POSE_KEYPOINTS = [
   'auto',
   // Groups — average multiple keypoints for robustness against
@@ -195,7 +211,7 @@ export type BeatPattern = {
 export type Job = {
   id: string
   video_id: string
-  mode: 'zone' | 'line' | 'marker' | 'audio' | 'pose' | 'imported'
+  mode: 'zone' | 'line' | 'marker' | 'audio' | 'pose' | 'object' | 'imported'
   params: Record<string, unknown>
   status: 'queued' | 'processing' | 'done' | 'failed'
   progress: number

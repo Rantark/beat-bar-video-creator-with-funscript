@@ -36,6 +36,12 @@ beat_this>=1.1
 # torch's hub cache. Pose mode is only available with this installed.
 ultralytics>=8.2
 
+# Optional: SAM 2 (Meta 2024) for Object detection mode. Click any
+# object in one frame; the model tracks it through the whole video.
+# The sam2.1_hiera_tiny.pt checkpoint (~150 MB) auto-downloads to
+# torch's hub cache on first job. Reuses the existing PyTorch install.
+sam2>=1.1
+
 # Desktop-app launcher (start-desktop.bat / backend/desktop.py). Only
 # needed if you want a native window instead of the browser tab.
 # Windows uses WebView2 (bundled with Windows 10 21H1+ / Windows 11).

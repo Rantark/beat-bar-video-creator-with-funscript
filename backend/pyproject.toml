@@ -30,6 +30,10 @@ neural = ["beat_this>=1.1"]
 # detection mode (YOLOv8-pose body-keypoint tracker). Reuses the
 # PyTorch install; the 6.5 MB model auto-downloads on first use.
 pose = ["ultralytics>=8.2"]
+# Optional: install with `pip install -e .[object]` to enable Object
+# detection mode (SAM 2 for click-to-track). ~150 MB tiny model
+# auto-downloads on first use.
+object = ["sam2>=1.1"]
 
 [build-system]
 requires = ["setuptools>=68"]
