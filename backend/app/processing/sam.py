@@ -111,7 +111,15 @@ class SamProcessor:
         except ImportError as exc:
             raise RuntimeError(
                 "Object mode requires the sam2 package — install with "
-                "`pip install sam2` in the backend venv."
+                "`pip install sam2 decord` in the backend venv. "
+                "(sam2 needs decord for MP4 loading but doesn't declare it as a dep.)"
+            ) from exc
+        try:
+            import decord  # noqa: F401  imported for the side-effect check
+        except ImportError as exc:
+            raise RuntimeError(
+                "Object mode also requires decord for MP4 loading. "
+                "In the backend venv: `pip install decord`."
             ) from exc
 
         # Download the tiny model if this is the first Object job.
