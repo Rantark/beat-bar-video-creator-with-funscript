@@ -75,12 +75,10 @@ function LocalPanel() {
     setError(null)
     try {
       const init = await api.initUpload({ filename: f.name, total_size: f.size })
-      for (let i = 0; i < init.total_chunks; i++) {
-        const start = i * init.chunk_size
-        const end = Math.min(start + init.chunk_size, f.size)
-        await withRetry(() => api.uploadChunk(init.upload_id, i, f.slice(start, end)), 5)
-        setProgress((i + 1) / init.total_chunks)
-      }
+      await uploadChunksParallel(
+        init.upload_id, f, init.total_chunks, init.chunk_size, 4,
+        setProgress,
+      )
       setStatus('finalizing')
       const { video_id } = await api.finalizeUpload(init.upload_id)
       setStatus('done')
@@ -382,6 +380,36 @@ async function withRetry<T>(fn: () => Promise<T>, attempts: number): Promise<T> 
   throw lastErr
 }
 
+// Concurrent chunk uploader — the old serial loop paid a full RTT of
+// latency per chunk, which is what makes mobile-Tailscale uploads feel
+// glacial. Running N chunks in flight at once fills the pipe instead of
+// dribbling. Progress is reported by fraction of chunks acked.
+async function uploadChunksParallel(
+  uploadId: string,
+  file: File,
+  totalChunks: number,
+  chunkSize: number,
+  concurrency: number,
+  onProgress: (frac: number) => void,
+): Promise<void> {
+  let nextChunk = 0
+  let acked = 0
+  async function worker() {
+    while (true) {
+      const i = nextChunk
+      if (i >= totalChunks) return
+      nextChunk = i + 1
+      const start = i * chunkSize
+      const end = Math.min(start + chunkSize, file.size)
+      await withRetry(() => api.uploadChunk(uploadId, i, file.slice(start, end)), 5)
+      acked += 1
+      onProgress(acked / totalChunks)
+    }
+  }
+  const workers = Array.from({ length: concurrency }, () => worker())
+  await Promise.all(workers)
+}
+
 function ImportPanel() {
   const [videoFile, setVideoFile] = useState<File | null>(null)
   const [funscriptFile, setFunscriptFile] = useState<File | null>(null)
@@ -430,15 +458,10 @@ function ImportPanel() {
           filename: videoFile.name,
           total_size: videoFile.size,
         })
-        for (let i = 0; i < init.total_chunks; i++) {
-          const start = i * init.chunk_size
-          const end = Math.min(start + init.chunk_size, videoFile.size)
-          await withRetry(
-            () => api.uploadChunk(init.upload_id, i, videoFile.slice(start, end)),
-            5,
-          )
-          setProgress((i + 1) / init.total_chunks)
-        }
+        await uploadChunksParallel(
+          init.upload_id, videoFile, init.total_chunks, init.chunk_size, 4,
+          setProgress,
+        )
         setStatus('finalizing')
         const fin = await api.finalizeUpload(init.upload_id)
         videoId = fin.video_id

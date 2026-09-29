@@ -21,6 +21,20 @@ async def lifespan(app: FastAPI):
     ):
         d.mkdir(parents=True, exist_ok=True)
     init_db()
+    # Any job that was mid-run when the previous process died is now a
+    # zombie — the BackgroundTask stopped with the interpreter but the
+    # DB row is still stuck at "processing". Mark them failed on boot
+    # so the user sees them in the right state and can retry.
+    from datetime import datetime, timezone
+    from app.db import get_db
+    now = datetime.now(timezone.utc).isoformat()
+    with get_db() as db:
+        db.execute(
+            "UPDATE jobs SET status=?, error=?, updated_at=? "
+            "WHERE status IN ('processing', 'queued')",
+            ("failed", "backend restarted while this job was running",
+             now),
+        )
     yield
 
 

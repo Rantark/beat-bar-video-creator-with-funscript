@@ -213,7 +213,7 @@ export type Job = {
   video_id: string
   mode: 'zone' | 'line' | 'marker' | 'audio' | 'pose' | 'object' | 'imported'
   params: Record<string, unknown>
-  status: 'queued' | 'processing' | 'done' | 'failed'
+  status: 'queued' | 'processing' | 'done' | 'failed' | 'cancelled'
   progress: number
   error: string | null
   created_at: string

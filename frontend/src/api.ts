@@ -32,6 +32,10 @@ export const api = {
     fetch(`${BASE}/jobs/${id}`, { method: 'DELETE' })
       .then(r => j<{ ok: boolean; removed: string[] }>(r, 'deleteJob')),
 
+  cancelJob: (id: string) =>
+    fetch(`${BASE}/jobs/${id}/cancel`, { method: 'POST' })
+      .then(r => j<{ ok: boolean; status: string; was_running: boolean }>(r, 'cancelJob')),
+
   createJob: (payload: {
     video_id: string
     mode: 'zone' | 'line' | 'marker' | 'audio' | 'pose' | 'object'

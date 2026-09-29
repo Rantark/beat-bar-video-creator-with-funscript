@@ -53,6 +53,16 @@ export default function JobsPage() {
     }
   }
 
+  async function cancelJob(id: string) {
+    if (!confirm('Stop this job? Partial output is discarded.')) return
+    try {
+      await api.cancelJob(id)
+      await reload()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
   if (error) return <p className="p-4 text-red-400">{error}</p>
   if (!jobs) return <p className="p-4 text-slate-400">Loading…</p>
   if (jobs.length === 0)
@@ -93,6 +103,15 @@ export default function JobsPage() {
                 )}
               </div>
               <div className="flex flex-col gap-2 shrink-0">
+                {(job.status === 'queued' || job.status === 'processing') && (
+                  <button
+                    onClick={() => cancelJob(job.id)}
+                    className="px-3 py-2 rounded text-sm text-center bg-amber-800 hover:bg-amber-700 text-amber-100"
+                    title="Stop this job. Cancellation checks in on every progress tick — usually takes 1-2 seconds to take effect."
+                  >
+                    Cancel
+                  </button>
+                )}
                 {job.status === 'done' && (
                   <a
                     href={api.downloadUrl(job.id)}
@@ -146,6 +165,8 @@ function StatusBadge({ status }: { status: Job['status'] }) {
       ? 'bg-indigo-800 text-indigo-200'
       : status === 'failed'
       ? 'bg-red-900 text-red-200'
+      : status === 'cancelled'
+      ? 'bg-amber-900 text-amber-200'
       : 'bg-slate-700 text-slate-200'
   return (
     <span className={`text-xs uppercase tracking-wide px-2 py-0.5 rounded ${cls}`}>

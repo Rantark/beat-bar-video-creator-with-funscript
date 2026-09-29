@@ -23,10 +23,13 @@ class Settings(BaseSettings):
     # change if ffmpeg moves. ffprobe is assumed to live next to ffmpeg.
     ffmpeg_path: str = r"C:\ffmpeg\bin\ffmpeg.exe"
 
-    # Chunked upload. 2 MB is a good balance for phone hotspot uploads:
-    # small enough that a dropped chunk only wastes ~2 MB of retry cost,
-    # large enough that per-request overhead stays negligible.
-    upload_chunk_size: int = 2 * 1024 * 1024
+    # Chunked upload. 8 MB with parallel chunks is much faster over
+    # mobile-Tailscale hops where per-request latency dominates. On a
+    # 5G connection with ~50-200 ms RTT to the home server, 2 MB
+    # sequential chunks meant most of the wall clock was spent waiting
+    # for round-trip handshakes rather than transferring data. Bigger
+    # chunks + concurrent-uploads on the client side reclaim that time.
+    upload_chunk_size: int = 8 * 1024 * 1024
 
     # Sprite sheet layout — 1 thumb per second at 160x90, 10 cols wide.
     sprite_thumb_width: int = 160

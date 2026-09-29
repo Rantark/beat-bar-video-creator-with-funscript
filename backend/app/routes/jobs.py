@@ -22,6 +22,20 @@ from app.processing.zone import ZoneProcessor
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
 
+# Cooperative cancellation. Each running job checks this set in its
+# progress callback; if the flag flipped on, the processor raises
+# JobCancelled which the outer runner catches and marks the row as
+# 'cancelled'. It's a set rather than dict because we don't need any
+# metadata — presence == "please stop." Kept process-local; if uvicorn
+# restarts, in-flight jobs die with the process (correct behaviour, no
+# ghost work continues after a restart).
+_JOB_CANCEL: set[str] = set()
+
+
+class JobCancelled(Exception):
+    """Raised by on_progress when the client requested cancellation."""
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -65,6 +79,31 @@ def get_job(job_id: str):
     if not row:
         raise HTTPException(404, "job not found")
     return _job_dict(row)
+
+
+@router.post("/{job_id}/cancel")
+def cancel_job(job_id: str):
+    """Ask a queued/processing job to stop. The worker checks the
+    cancel set in its progress callback and raises JobCancelled at
+    the next tick — usually within 1-2s of this request landing.
+    Idempotent; calling on a non-running job is a no-op."""
+    with get_db() as db:
+        row = db.execute(
+            "SELECT status FROM jobs WHERE id=?", (job_id,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, "job not found")
+    if row["status"] in ("done", "failed", "cancelled"):
+        return {"ok": True, "status": row["status"], "was_running": False}
+    _JOB_CANCEL.add(job_id)
+    # Also flag the row so the UI can show "cancelling…" between the
+    # request and the worker actually noticing.
+    with get_db() as db:
+        db.execute(
+            "UPDATE jobs SET updated_at=? WHERE id=?",
+            (_now_iso(), job_id),
+        )
+    return {"ok": True, "status": "cancelling", "was_running": True}
 
 
 @router.get("/{job_id}/meta")
@@ -403,6 +442,11 @@ def _run_job(job_id: str) -> None:
             debug_out_path = settings.output_dir / f"{job_id}_debug.mp4"
 
         def on_progress(p: float) -> None:
+            # Cooperative cancellation: every progress tick is a chance
+            # for the client to cut a job short. Processors call this
+            # frequently enough that cancel usually lands within 1-2s.
+            if job_id in _JOB_CANCEL:
+                raise JobCancelled()
             with get_db() as db:
                 db.execute(
                     "UPDATE jobs SET progress=?, updated_at=? WHERE id=?",
@@ -419,8 +463,16 @@ def _run_job(job_id: str) -> None:
                 "WHERE id=?",
                 ("done", 1.0, str(out_path), _now_iso(), job_id),
             )
+    except JobCancelled:
+        with get_db() as db:
+            db.execute(
+                "UPDATE jobs SET status=?, error=?, updated_at=? WHERE id=?",
+                ("cancelled", "cancelled by user", _now_iso(), job_id),
+            )
     except Exception:
         _fail(job_id, traceback.format_exc())
+    finally:
+        _JOB_CANCEL.discard(job_id)
 
 
 def _fail(job_id: str, error: str) -> None:
