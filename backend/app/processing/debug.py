@@ -173,13 +173,17 @@ def render_audio_debug(
 
     Optional custom sprites
     -----------------------
-    `bar_image`     — tiled/scaled across the strip background
+    `bar_image`     — tiled/scaled across the strip background. When
+                      omitted (default), NO backdrop is drawn — the
+                      scrolling beats + hit marker overlay directly on
+                      the source video for a clean look. Upload a bar
+                      image when you want a dedicated backdrop.
     `hit_image`     — drawn at the fixed hit-marker position
     `beat_image`    — drawn for each scrolling beat (respects alpha)
 
-    Falls back to drawn primitives (dark strip / white line / cyan
-    circle) when a slot is None so the mode is useful without any
-    uploads.
+    Fall-backs for hit and beat when their slot is None: a white vertical
+    line for the hit marker and cyan circles for beats, so the mode is
+    useful without any uploads.
     """
     beats = sorted(int(t) for t in beat_times_ms)
     event_set = set(int(i) for i in beat_frame_indices)
@@ -232,45 +236,27 @@ def render_audio_debug(
         hit_x = cache["hit_x"]
         px_per_ms = cache["px_per_ms"]
 
-        # Background
+        # Background — only drawn when the user uploaded a bar sprite.
+        # The default (no backdrop) keeps the overlay transparent so the
+        # scrolling beats sit directly on top of the source video, which
+        # reads much cleaner than a dark gradient strip blocking the
+        # content behind it.
         if cache["bar_scaled"] is not None:
             frame[bar_y:bar_y + bar_h, bar_x1:bar_x2] = cache["bar_scaled"]
-        else:
-            overlay = frame.copy()
-            cv2.rectangle(
-                overlay, (bar_x1, bar_y), (bar_x2, bar_y + bar_h),
-                (20, 20, 20), -1,
-            )
-            cv2.addWeighted(overlay, 0.65, frame, 0.35, 0, dst=frame)
-            cv2.rectangle(
-                frame, (bar_x1, bar_y), (bar_x2, bar_y + bar_h),
-                (120, 120, 120), 1,
-            )
 
         # Current playback time on the bar timeline.
         cursor_t_ms = 0
         if _cached_total_frames[0] > 0:
             cursor_t_ms = int(frame_idx * (total_ms / _cached_total_frames[0]))
 
-        # Novelty glow — sample the activation curve across the visible
-        # window and draw a translucent fill up from the bar's baseline.
-        # Height scales with the model's beat probability, so real music
-        # activity is visible even between the discrete beat sprites.
+        # Novelty glow intentionally omitted from the main render — the
+        # green activity envelope is useful info but clutters the clean
+        # beat-bar look. The novelty array stays in the function
+        # signature in case we want to produce a separate "detector
+        # debug" render later.
+        _ = novelty_arr, novelty_hop_ms
         window_lo = cursor_t_ms - lookback_ms
         window_hi = cursor_t_ms + lookahead_ms
-        if novelty_arr.size and novelty_hop_ms > 0:
-            baseline_y = bar_y + bar_h - 2
-            max_h = max(4, bar_h // 3)
-            step = max(2, (bar_x2 - bar_x1) // 200)
-            for x in range(bar_x1, bar_x2, step):
-                t = cursor_t_ms + int((x - hit_x) / px_per_ms)
-                idx = int(t / novelty_hop_ms)
-                if 0 <= idx < novelty_arr.size:
-                    v = float(novelty_arr[idx])
-                    if v > 0.05:
-                        top = baseline_y - int(v * max_h)
-                        cv2.line(frame, (x, baseline_y), (x, top),
-                                 (80, 200, 80), max(1, step - 1))
 
         # Scrolling beats — binary-search the visible window instead of
         # scanning the full list per frame. Downbeats (first beat of
